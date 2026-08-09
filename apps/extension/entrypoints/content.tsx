@@ -3,6 +3,8 @@ import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 
 import "../src/ui/content.css";
+import { discoverFields } from "../src/fields/discover.js";
+import { NormalizedFieldRegistry } from "../src/fields/registry.js";
 import { extractJob } from "../src/jobs/extract.js";
 import { observeMutations } from "../src/observer/mutations.js";
 import { observeRoutes } from "../src/observer/routes.js";
@@ -51,6 +53,7 @@ export default defineContentScript({
   cssInjectionMode: "ui",
   async main(ctx) {
     let lastObservation = "";
+    const fields = new NormalizedFieldRegistry();
     let currentContext: ContextStatus | undefined;
     const contextListeners = new Set<(status: ContextStatus | undefined) => void>();
     const publishContext = (status: ContextStatus | undefined) => {
@@ -123,6 +126,7 @@ export default defineContentScript({
     }
 
     async function inspectPage() {
+      fields.reconcile(discoverFields(document, `${location.origin}${location.pathname}`));
       const classification = classifyPage(document);
       const signature = `${location.href}|${classification.type}`;
       if (signature === lastObservation) return;

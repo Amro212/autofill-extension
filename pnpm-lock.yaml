@@ -26,6 +26,9 @@ importers:
       '@job-copilot/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@job-copilot/field-core':
+        specifier: workspace:*
+        version: link:../../packages/field-core
       react:
         specifier: ^19.2.8
         version: 19.2.8
@@ -88,6 +91,12 @@ importers:
       zod:
         specifier: ^4.4.3
         version: 4.4.3
+
+  packages/field-core:
+    dependencies:
+      '@job-copilot/contracts':
+        specifier: workspace:*
+        version: link:../contracts
 
 packages:
 
