@@ -224,4 +224,59 @@ describe("backend client", () => {
       }),
     );
   });
+
+  it("persists an application state transition through an authenticated PATCH", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ id: "application-1", state: "SCANNING" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const client = createBackendClient({
+      fetcher,
+      getToken: async () => "paired-token",
+    });
+
+    await client.transitionApplication("application-1", "SCANNING");
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://127.0.0.1:4317/v1/applications/application-1/state",
+      expect.objectContaining({
+        method: "PATCH",
+        headers: expect.objectContaining({ authorization: "Bearer paired-token" }),
+        body: JSON.stringify({ state: "SCANNING" }),
+      }),
+    );
+  });
+
+  it("downloads authenticated document bytes and preserves server metadata", async () => {
+    const bytes = new Uint8Array([37, 80, 68, 70]);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(bytes, {
+        status: 200,
+        headers: {
+          "content-type": "application/pdf",
+          "content-disposition": "attachment; filename*=UTF-8''Ada%20Resume.pdf",
+        },
+      }),
+    );
+    const client = createBackendClient({
+      fetcher,
+      getToken: async () => "paired-token",
+    });
+
+    const document = await client.getDocumentContent("document-1");
+
+    expect(new Uint8Array(document.bytes)).toEqual(bytes);
+    expect(document).toMatchObject({
+      filename: "Ada Resume.pdf",
+      mediaType: "application/pdf",
+    });
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://127.0.0.1:4317/v1/documents/document-1/content",
+      expect.objectContaining({
+        headers: { authorization: "Bearer paired-token" },
+      }),
+    );
+  });
 });

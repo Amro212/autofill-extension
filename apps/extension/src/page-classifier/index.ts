@@ -1,3 +1,5 @@
+import { classifyBoundary } from "../boundaries/classify.js";
+
 export type PageType =
   | "unrelated"
   | "job-listing"
@@ -23,18 +25,12 @@ function result(type: PageType, confidence: number, ...evidence: string[]) {
 
 export function classifyPage(document: Document): PageClassification {
   const text = pageText(document);
-  if (
-    document.querySelector(".g-recaptcha, .h-captcha, [data-sitekey], iframe[src*='captcha']") ||
-    /verify (?:that )?you are human|security challenge/.test(text)
-  ) {
+  const boundary = classifyBoundary(document);
+  if (boundary.type === "captcha") {
     return result("captcha", 0.99, "captcha marker");
   }
-  if (
-    /coding (?:assessment|challenge)|timed assessment|video interview|identity verification|electronic signature|legal (?:declaration|attestation)/.test(
-      text,
-    )
-  ) {
-    return result("boundary", 0.98, "user boundary language");
+  if (boundary.type !== "none") {
+    return result("boundary", 0.98, boundary.reason ?? "user boundary language");
   }
   if (/application (?:was )?submitted|thank you for applying|application received/.test(text)) {
     return result("confirmation", 0.98, "submission confirmation language");
@@ -68,4 +64,3 @@ export function classifyPage(document: Document): PageClassification {
   }
   return result("unrelated", 0.8, "no job or application evidence");
 }
-

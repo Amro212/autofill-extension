@@ -60,6 +60,20 @@ describe("job and application persistence", () => {
     restarted.connection.close();
     rmSync(first.directory!, { recursive: true, force: true });
   });
+
+  it("persists only legal state transitions", () => {
+    const stores = openStores();
+    const session = stores.applications.create({ activeTabIds: [1] });
+
+    expect(
+      stores.applications.transition(session.id, "APPLICATION_LINKED"),
+    ).toMatchObject({ state: "APPLICATION_LINKED" });
+    expect(() =>
+      stores.applications.transition(session.id, "SUBMITTED"),
+    ).toThrow("Illegal application transition");
+    stores.connection.close();
+    rmSync(stores.directory!, { recursive: true, force: true });
+  });
 });
 
 describe("job and application API", () => {
@@ -114,6 +128,22 @@ describe("job and application API", () => {
     });
     expect(recovered.statusCode).toBe(200);
     expect(recovered.json()).toMatchObject({ jobId: job.id, activeTabIds: [7, 9] });
+
+    const transitioned = await app.inject({
+      method: "PATCH",
+      url: `/v1/applications/${created.json<{ id: string }>().id}/state`,
+      headers: { authorization },
+      payload: { state: "APPLICATION_LINKED" },
+    });
+    expect(transitioned.statusCode).toBe(200);
+    expect(transitioned.json()).toMatchObject({ state: "APPLICATION_LINKED" });
+
+    const illegal = await app.inject({
+      method: "PATCH",
+      url: `/v1/applications/${created.json<{ id: string }>().id}/state`,
+      headers: { authorization },
+      payload: { state: "SUBMITTED" },
+    });
+    expect(illegal.statusCode).toBe(409);
   });
 });
-

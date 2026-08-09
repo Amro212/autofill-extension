@@ -21,18 +21,22 @@ const session: ApplicationSession = {
 describe("SessionController", () => {
   it("persists every linked tab when starting a correlated session", async () => {
     const set = vi.fn();
+    const linkedSession = { ...session, state: "APPLICATION_LINKED" as const };
+    const transitionApplication = vi.fn().mockResolvedValue(linkedSession);
     const controller = new SessionController(
       {
         createApplication: vi.fn().mockResolvedValue(session),
         getApplication: vi.fn(),
         getApplicationByTab: vi.fn(),
+        transitionApplication,
       },
       { get: vi.fn(), set },
     );
 
     await expect(
       controller.start({ jobId: "job-1", originatingTabId: 10, activeTabIds: [10, 20] }),
-    ).resolves.toEqual(session);
+    ).resolves.toEqual(linkedSession);
+    expect(transitionApplication).toHaveBeenCalledWith("application-1", "APPLICATION_LINKED");
     expect(set.mock.calls).toEqual([
       [10, "application-1"],
       [20, "application-1"],
@@ -44,7 +48,12 @@ describe("SessionController", () => {
     const getApplicationByTab = vi.fn().mockResolvedValue(session);
     const set = vi.fn();
     const controller = new SessionController(
-      { createApplication: vi.fn(), getApplication, getApplicationByTab },
+      {
+        createApplication: vi.fn(),
+        getApplication,
+        getApplicationByTab,
+        transitionApplication: vi.fn(),
+      },
       {
         get: vi.fn().mockResolvedValueOnce("application-1").mockResolvedValueOnce(null),
         set,
@@ -58,4 +67,3 @@ describe("SessionController", () => {
     expect(set).toHaveBeenLastCalledWith(20, "application-1");
   });
 });
-

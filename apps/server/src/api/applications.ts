@@ -1,4 +1,7 @@
-import { applicationCreateSchema } from "@job-copilot/contracts";
+import {
+  applicationCreateSchema,
+  applicationTransitionSchema,
+} from "@job-copilot/contracts";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
@@ -40,5 +43,21 @@ export function registerApplicationRoutes(
     const session = applications.get(parsed.data.id);
     return session === undefined ? reply.code(404).send() : session;
   });
+  app.patch("/v1/applications/:id/state", { preHandler }, async (request, reply) => {
+    const params = idParamsSchema.safeParse(request.params);
+    const body = applicationTransitionSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      return reply.code(400).send({
+        error: { code: "VALIDATION_FAILED", message: "Invalid state transition" },
+      });
+    }
+    try {
+      const session = applications.transition(params.data.id, body.data.state);
+      return session === undefined ? reply.code(404).send() : session;
+    } catch {
+      return reply.code(409).send({
+        error: { code: "ILLEGAL_STATE_TRANSITION", message: "Illegal application transition" },
+      });
+    }
+  });
 }
-

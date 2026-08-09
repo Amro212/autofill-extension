@@ -5,7 +5,9 @@ import {
   applicationSessionSchema,
   type ApplicationCreate,
   type ApplicationSession,
+  type ApplicationState,
 } from "@job-copilot/contracts";
+import { transitionApplication } from "@job-copilot/application-core";
 import { and, desc, eq } from "drizzle-orm";
 
 import type { JobCopilotDatabase } from "../db/client.js";
@@ -78,5 +80,27 @@ export class ApplicationRepository {
     }
     return undefined;
   }
-}
 
+  transition(id: string, to: ApplicationState): ApplicationSession | undefined {
+    const current = this.get(id);
+    if (current === undefined) return undefined;
+    const state = transitionApplication(current.state, to);
+    const updatedAt = new Date().toISOString();
+    const session = applicationSessionSchema.parse({
+      ...current,
+      state,
+      updatedAt,
+      ...(state === "SUBMITTED" ? { submittedAt: updatedAt } : {}),
+    });
+    this.db
+      .update(applications)
+      .set({
+        state,
+        dataJson: JSON.stringify(session),
+        updatedAt,
+      })
+      .where(and(eq(applications.id, id), eq(applications.userId, this.#userId)))
+      .run();
+    return session;
+  }
+}

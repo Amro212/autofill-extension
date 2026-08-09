@@ -45,6 +45,11 @@ export const applicationCreateSchema = z.object({
   activeTabIds: z.array(z.number().int().nonnegative()).default([]),
 });
 
+export const applicationTransitionSchema = z
+  .object({ state: applicationStateSchema })
+  .strict();
+
 export type ApplicationState = z.infer<typeof applicationStateSchema>;
 export type ApplicationSession = z.infer<typeof applicationSessionSchema>;
 export type ApplicationCreate = z.input<typeof applicationCreateSchema>;
+export type ApplicationTransition = z.infer<typeof applicationTransitionSchema>;

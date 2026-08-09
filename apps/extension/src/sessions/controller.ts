@@ -1,12 +1,17 @@
 import type {
   ApplicationCreate,
   ApplicationSession,
+  ApplicationState,
 } from "@job-copilot/contracts";
 
 export interface SessionApi {
   createApplication: (input: ApplicationCreate) => Promise<ApplicationSession>;
   getApplication: (id: string) => Promise<ApplicationSession>;
   getApplicationByTab: (tabId: number) => Promise<ApplicationSession>;
+  transitionApplication: (
+    id: string,
+    state: ApplicationState,
+  ) => Promise<ApplicationSession>;
 }
 
 export interface TabSessionStore {
@@ -21,7 +26,11 @@ export class SessionController {
   ) {}
 
   async start(input: ApplicationCreate): Promise<ApplicationSession> {
-    const session = await this.api.createApplication(input);
+    const created = await this.api.createApplication(input);
+    const session =
+      created.state === "DISCOVERED"
+        ? await this.api.transitionApplication(created.id, "APPLICATION_LINKED")
+        : created;
     const tabIds = new Set(session.activeTabIds ?? []);
     if (session.originatingTabId !== undefined) tabIds.add(session.originatingTabId);
     await Promise.all([...tabIds].map((tabId) => this.tabs.set(tabId, session.id)));
@@ -38,4 +47,3 @@ export class SessionController {
     return session;
   }
 }
-

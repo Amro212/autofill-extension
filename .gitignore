@@ -22,6 +22,8 @@ references/
 # Local runtime and private artifacts
 data/
 uploads/
+!apps/extension/src/uploads/
+!apps/extension/src/uploads/**
 generated-documents/
 debug-bundles/
 *.sqlite

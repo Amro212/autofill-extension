@@ -13,6 +13,7 @@
   "dependencies": {
     "@fastify/multipart": "^10.1.0",
     "@job-copilot/ai-core": "workspace:*",
+    "@job-copilot/application-core": "workspace:*",
     "@job-copilot/contracts": "workspace:*",
     "drizzle-orm": "1.0.0-rc.4",
     "fastify": "^5.11.2",

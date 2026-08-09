@@ -3,9 +3,11 @@ import type {
   ApplicantProfileUpdate,
   ApplicationCreate,
   ApplicationSession,
+  ApplicationState,
   AutomationSettings,
   AutomationSettingsUpdate,
   DocumentKind,
+  DocumentMediaType,
   DocumentMetadata,
   JobCapture,
   JobRecord,
@@ -56,6 +58,16 @@ export function createBackendClient(options: BackendClientOptions) {
     return body;
   }
 
+  function documentFilename(disposition: string | null): string {
+    const encoded = disposition?.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+    if (encoded === undefined) return "document";
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      return "document";
+    }
+  }
+
   return {
     health: () => request<{ status: "ok" }>("/health"),
     authStatus: () =>
@@ -86,6 +98,33 @@ export function createBackendClient(options: BackendClientOptions) {
       }),
     getDocuments: () =>
       request<DocumentMetadata[]>("/v1/documents", { authenticated: true }),
+    async getDocumentContent(id: string): Promise<{
+      bytes: ArrayBuffer;
+      filename: string;
+      mediaType: DocumentMediaType;
+    }> {
+      const token = await options.getToken();
+      const headers: Record<string, string> = {};
+      if (token !== null) headers.authorization = `Bearer ${token}`;
+      const response = await fetcher(
+        `${baseUrl}/v1/documents/${encodeURIComponent(id)}/content`,
+        { method: "GET", headers },
+      );
+      if (!response.ok) throw new Error(`Document download failed (${response.status})`);
+      const mediaType = response.headers.get("content-type");
+      if (
+        mediaType !== "application/pdf" &&
+        mediaType !==
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      ) {
+        throw new Error("Document download returned an unsupported content type");
+      }
+      return {
+        bytes: await response.arrayBuffer(),
+        filename: documentFilename(response.headers.get("content-disposition")),
+        mediaType,
+      };
+    },
     setDefaultDocument: (id: string) =>
       request<DocumentMetadata>(`/v1/documents/${id}/default`, {
         authenticated: true,
@@ -134,6 +173,12 @@ export function createBackendClient(options: BackendClientOptions) {
     getApplicationByTab: (tabId: number) =>
       request<ApplicationSession>(`/v1/applications/by-tab/${tabId}`, {
         authenticated: true,
+      }),
+    transitionApplication: (id: string, state: ApplicationState) =>
+      request<ApplicationSession>(`/v1/applications/${encodeURIComponent(id)}/state`, {
+        authenticated: true,
+        method: "PATCH",
+        body: { state },
       }),
     answerPage: (input: PageAnswerRequest) =>
       request<PageAnswerResult>("/v1/ai/pages/answer", {

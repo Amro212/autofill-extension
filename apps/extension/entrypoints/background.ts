@@ -1,6 +1,7 @@
 import { browser, defineBackground } from "#imports";
 import {
   applicantProfileUpdateSchema,
+  applicationTransitionSchema,
   automationSettingsUpdateSchema,
   documentKindSchema,
   documentMediaTypeSchema,
@@ -32,6 +33,15 @@ function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function toBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
 }
 
 export default defineBackground(() => {
@@ -125,6 +135,28 @@ export default defineBackground(() => {
       if (message.type === "JOB_COPILOT_REWRITE_FIELD" && "request" in message) {
         const request = rewriteRequestSchema.safeParse(message.request);
         if (request.success) return client.rewriteField(request.data);
+      }
+      if (
+        message.type === "JOB_COPILOT_TRANSITION_APPLICATION" &&
+        "id" in message &&
+        typeof message.id === "string" &&
+        "state" in message
+      ) {
+        const transition = applicationTransitionSchema.safeParse({ state: message.state });
+        if (transition.success) {
+          return client.transitionApplication(message.id, transition.data.state);
+        }
+      }
+      if (
+        message.type === "JOB_COPILOT_GET_DOCUMENT_CONTENT" &&
+        "id" in message &&
+        typeof message.id === "string"
+      ) {
+        return client.getDocumentContent(message.id).then((document) => ({
+          base64: toBase64(document.bytes),
+          filename: document.filename,
+          mediaType: document.mediaType,
+        }));
       }
       if (
         message.type === "JOB_COPILOT_SET_DEFAULT_DOCUMENT" &&
