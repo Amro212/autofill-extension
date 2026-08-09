@@ -113,6 +113,19 @@ export default defineBackground(() => {
       typeof message === "object" &&
       message !== null &&
       "type" in message &&
+      message.type === "JOB_COPILOT_SELECT_DOCUMENT" &&
+      "applicationId" in message &&
+      typeof message.applicationId === "string" &&
+      "kind" in message
+    ) {
+      const kind = documentKindSchema.safeParse(message.kind);
+      if (!kind.success) return undefined;
+      return client.selectApplicationDocument(message.applicationId, kind.data);
+    }
+    if (
+      typeof message === "object" &&
+      message !== null &&
+      "type" in message &&
       message.type === "PAIR_BACKEND" &&
       "pairingSecret" in message &&
       typeof message.pairingSecret === "string"

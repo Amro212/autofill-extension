@@ -98,6 +98,11 @@ export function createBackendClient(options: BackendClientOptions) {
       }),
     getDocuments: () =>
       request<DocumentMetadata[]>("/v1/documents", { authenticated: true }),
+    selectApplicationDocument: (applicationId: string, kind: DocumentKind) =>
+      request<DocumentMetadata>(
+        `/v1/applications/${encodeURIComponent(applicationId)}/documents/select`,
+        { authenticated: true, method: "POST", body: { kind } },
+      ),
     async getDocumentContent(id: string): Promise<{
       bytes: ArrayBuffer;
       filename: string;

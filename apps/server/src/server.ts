@@ -12,6 +12,7 @@ import { migrateDatabase } from "./db/migrate.js";
 import { DocumentImportService } from "./documents/import.js";
 import { DocumentAiService } from "./documents/generation.js";
 import { DocumentStorage } from "./documents/storage.js";
+import { DocumentStrategyService } from "./documents/strategy.js";
 import { DocumentWorkflowService } from "./documents/workflow.js";
 import { AnswerMemoryRepository } from "./memory/repository.js";
 import { DocumentRepository } from "./repositories/documents.js";
@@ -90,6 +91,11 @@ export function createServerRuntime(env: NodeJS.ProcessEnv = process.env) {
     jobs: jobRepository,
     profiles: profileRepository,
   });
+  const documentStrategy = new DocumentStrategyService({
+    applications: applicationRepository,
+    documents: documentService,
+    workflow: documentWorkflow,
+  });
   const app = buildApp({
     applicationRepository,
     ai: {
@@ -101,6 +107,7 @@ export function createServerRuntime(env: NodeJS.ProcessEnv = process.env) {
       answers: new AnswerRecordRepository(connection.db),
     },
     documentService,
+    documentStrategy,
     documentWorkflow,
     jobRepository,
     pairingService,

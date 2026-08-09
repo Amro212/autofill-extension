@@ -15,6 +15,7 @@ import { PageAutomationController } from "../src/automation/controller.js";
 import { injectMainWorldBridge, type MainWorldBridge } from "../src/bridge/inject.js";
 import { discoverFields } from "../src/fields/discover.js";
 import { activeAtsAdapter } from "../src/adapters/registry.js";
+import { DebugJournal } from "../src/debug/journal.js";
 import { executeField } from "../src/fields/execute.js";
 import { NormalizedFieldRegistry } from "../src/fields/registry.js";
 import { FillController, type FillPageResult } from "../src/fill/controller.js";
@@ -112,26 +113,77 @@ export default defineContentScript({
   async main(ctx) {
     let lastObservation = "";
     const fields = new NormalizedFieldRegistry();
+    const journal = new DebugJournal();
+    const selectedDocumentIds = new Set<string>();
     let currentContext: ContextStatus | undefined;
     let currentSession: ApplicationSession | undefined;
     let detectedFieldCount = 0;
     let mainWorldBridge: MainWorldBridge | undefined;
     const contextListeners = new Set<(status: ContextStatus | undefined) => void>();
     const fieldCountListeners = new Set<(count: number) => void>();
+    const debugListeners = new Set<() => void>();
+    const recordDebug = (type: string, data: unknown = {}) => {
+      journal.record(type, data);
+      for (const listener of debugListeners) listener();
+    };
     const publishContext = (status: ContextStatus | undefined) => {
       currentContext = status;
       for (const listener of contextListeners) listener(status);
     };
     const pageKey = () => pageTransitionSignature(document, window);
-    const answerPage = (request: PageAnswerRequest): Promise<PageAnswerResult> =>
-      browser.runtime.sendMessage({ type: "JOB_COPILOT_ANSWER_PAGE", request });
+    const answerPage = async (request: PageAnswerRequest): Promise<PageAnswerResult> => {
+      recordDebug("ai-request", {
+        task: "answer-page",
+        fieldCount: request.fields.length,
+        applicationId: request.applicationId,
+      });
+      try {
+        const result = await browser.runtime.sendMessage({
+          type: "JOB_COPILOT_ANSWER_PAGE",
+          request,
+        });
+        recordDebug("ai-response", {
+          task: "answer-page",
+          answerCount: (result as PageAnswerResult).answers.length,
+        });
+        return result as PageAnswerResult;
+      } catch (error) {
+        recordDebug("error", {
+          code: "LLM_PROVIDER_ERROR",
+          message: error instanceof Error ? error.message : "AI request failed",
+        });
+        throw error;
+      }
+    };
     const execute: typeof executeField = async (discovered, value) => {
       try {
         mainWorldBridge ??= await injectMainWorldBridge();
-        return executeField(discovered, value, { bridge: mainWorldBridge });
+        const result = await executeField(discovered, value, { bridge: mainWorldBridge });
+        recordDebug("field-action", {
+          fieldId: discovered.field.id,
+          kind: discovered.field.kind,
+          ok: result.ok,
+          ...(result.reason === undefined ? {} : { reason: result.reason }),
+        });
+        return result;
       } catch {
-        return executeField(discovered, value);
+        const result = await executeField(discovered, value);
+        recordDebug("field-action", {
+          fieldId: discovered.field.id,
+          kind: discovered.field.kind,
+          ok: result.ok,
+          ...(result.reason === undefined ? {} : { reason: result.reason }),
+        });
+        return result;
       }
+    };
+    const inspectAndRecordValidation = (targetDocument: Document) => {
+      const issues = inspectValidation(targetDocument, fields);
+      recordDebug("validation", {
+        count: issues.length,
+        codes: issues.map(({ code }) => code),
+      });
+      return issues;
     };
     const fillController = new FillController({
       registry: fields,
@@ -163,13 +215,27 @@ export default defineContentScript({
         const kind = /cover\s*letter/i.test(`${field.label} ${field.semanticType ?? ""}`)
           ? "cover-letter"
           : "resume";
-        const metadata =
+        let metadata: DocumentMetadata | undefined;
+        if (currentSession !== undefined) {
+          try {
+            metadata = (await browser.runtime.sendMessage({
+              type: "JOB_COPILOT_SELECT_DOCUMENT",
+              applicationId: currentSession.id,
+              kind,
+            })) as DocumentMetadata;
+          } catch {
+            // Fall back to the local library selection below.
+          }
+        }
+        metadata ??=
           documents.find((document) => document.kind === kind && document.isDefault) ??
           documents.find((document) => document.kind === kind);
         if (metadata === undefined) {
           if (field.required) failed += 1;
+          recordDebug("error", { code: "UPLOAD_FAILED", fieldId: field.id });
           continue;
         }
+        selectedDocumentIds.add(metadata.id);
         const content = readDocumentContent(
           await browser.runtime.sendMessage({
             type: "JOB_COPILOT_GET_DOCUMENT_CONTENT",
@@ -178,6 +244,7 @@ export default defineContentScript({
         );
         if (content === undefined) {
           failed += 1;
+          recordDebug("error", { code: "UPLOAD_FAILED", documentId: metadata.id });
           continue;
         }
         const file = new File([Uint8Array.from(content.bytes).buffer], content.filename, {
@@ -190,8 +257,23 @@ export default defineContentScript({
               input.value.endsWith(file.name)),
           timeoutMs: 5_000,
         });
-        if (result.ok) uploaded += 1;
-        else failed += 1;
+        if (result.ok) {
+          uploaded += 1;
+          recordDebug("document-upload", {
+            fieldId: field.id,
+            documentId: metadata.id,
+            kind,
+            ok: true,
+          });
+        } else {
+          failed += 1;
+          recordDebug("error", {
+            code: "UPLOAD_FAILED",
+            fieldId: field.id,
+            documentId: metadata.id,
+            reason: result.reason,
+          });
+        }
       }
       return { uploaded, failed };
     }
@@ -223,6 +305,7 @@ export default defineContentScript({
             const session = readApplicationSession(response);
             if (session === undefined) throw new Error("Application transition failed");
             currentSession = session;
+            recordDebug("state-transition", { state: session.state });
             return session.state;
           },
           fillPage: async (input) => {
@@ -230,7 +313,7 @@ export default defineContentScript({
             return fillResult;
           },
           uploadDocuments: uploadDefaultDocuments,
-          inspectValidation: () => inspectValidation(document, fields),
+          inspectValidation: () => inspectAndRecordValidation(document),
           repairPage: () =>
             repair.repairPage(document, {
               pageKey: key,
@@ -239,7 +322,7 @@ export default defineContentScript({
           advance: (targetDocument, navigationSettings) => {
             const before = pageTransitionSignature(targetDocument, window);
             return new NavigationController({
-              inspectValidation: () => inspectValidation(targetDocument, fields),
+              inspectValidation: () => inspectAndRecordValidation(targetDocument),
               waitForTransition: () =>
                 waitForPageTransition(targetDocument, window, before, { timeoutMs: 8_000 }),
             }).advance(targetDocument, navigationSettings);
@@ -251,6 +334,11 @@ export default defineContentScript({
           state: currentSession.state,
           classification: classifyPage(document),
           settings,
+        });
+        recordDebug("automation-result", {
+          status: result.status,
+          filled: fillResult.filled,
+          failed: fillResult.failed,
         });
         resume = result.status === "navigated" || result.status === "captcha-cleared";
         return fillResult;
@@ -305,24 +393,89 @@ export default defineContentScript({
         }),
       fillPage: () => runPageAutomation(),
       undoLast: () => fillController.undoLast(),
+      scanPage: async () => {
+        lastObservation = "";
+        await inspectPage();
+      },
+      retryFailed: () => runPageAutomation(),
+      pauseResume: async () => {
+        if (currentSession === undefined) return;
+        const state = currentSession.state === "PAUSED" ? "SCANNING" : "PAUSED";
+        currentSession = readApplicationSession(
+          await browser.runtime.sendMessage({
+            type: "JOB_COPILOT_TRANSITION_APPLICATION",
+            id: currentSession.id,
+            state,
+          }),
+        );
+        recordDebug("state-transition", { state });
+      },
+      exportDebugBundle: async () => {
+        const adapterId = activeAtsAdapter(document).id;
+        const bundle = journal.bundle({
+          adapterId,
+          ...(currentSession === undefined ? {} : { sessionId: currentSession.id }),
+          page: new URL(location.href),
+          fields: fields.list().map((field) => ({
+            id: field.id,
+            kind: field.kind,
+            label: field.label,
+            required: field.required,
+          })),
+        });
+        const url = URL.createObjectURL(
+          new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" }),
+        );
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = `job-copilot-debug-${Date.now()}.json`;
+        anchor.click();
+        URL.revokeObjectURL(url);
+      },
     };
 
     function RuntimePanel() {
       const [contextStatus, setContextStatus] = useState(currentContext);
       const [fieldCount, setFieldCount] = useState(detectedFieldCount);
+      const [, setDebugRevision] = useState(0);
       useEffect(() => {
         contextListeners.add(setContextStatus);
         fieldCountListeners.add(setFieldCount);
+        const refreshDebug = () => setDebugRevision((revision) => revision + 1);
+        debugListeners.add(refreshDebug);
         return () => {
           contextListeners.delete(setContextStatus);
           fieldCountListeners.delete(setFieldCount);
+          debugListeners.delete(refreshDebug);
         };
       }, []);
+      const events = journal.events();
+      const errors = events.flatMap((event) => {
+        if (event.type !== "error" || typeof event.data !== "object" || event.data === null) {
+          return [];
+        }
+        return "code" in event.data && typeof event.data.code === "string"
+          ? [event.data.code]
+          : ["UNKNOWN_ERROR"];
+      });
       return (
         <Panel
           {...panelApi}
           {...(contextStatus === undefined ? {} : { contextStatus })}
           detectedFieldCount={fieldCount}
+          applicationStatus={{
+            adapterId: activeAtsAdapter(document).id,
+            ...(currentSession === undefined
+              ? {}
+              : { sessionId: currentSession.id, state: currentSession.state }),
+            step: pageKey(),
+            selectedDocuments: selectedDocumentIds.size,
+          }}
+          debugStatus={{
+            fieldCount,
+            recentActions: events.slice(-8).map(({ type }) => type),
+            errors: [...new Set(errors)].slice(-8),
+          }}
           confirmJobContext={async (jobId) => {
             const response = await browser.runtime.sendMessage({
               type: "JOB_COPILOT_CONFIRM_JOB_CONTEXT",
@@ -330,6 +483,9 @@ export default defineContentScript({
               adapterId: activeAtsAdapter(document).id,
             });
             currentSession = readApplicationSession(response);
+            recordDebug("job-context", {
+              status: readContextStatus(response)?.status ?? "missing",
+            });
             publishContext(readContextStatus(response));
           }}
         />
@@ -344,6 +500,12 @@ export default defineContentScript({
         for (const listener of fieldCountListeners) listener(nextFieldCount);
       }
       const classification = classifyPage(document);
+      recordDebug("scan", {
+        adapterId: activeAtsAdapter(document).id,
+        pageType: classification.type,
+        fieldCount: fields.list().length,
+        pathname: location.pathname,
+      });
       const signature = `${location.href}|${classification.type}`;
       if (signature === lastObservation) return;
       try {
@@ -352,6 +514,7 @@ export default defineContentScript({
             type: "JOB_COPILOT_CAPTURE_JOB",
             job: extractJob(document, new URL(location.href)),
           });
+          recordDebug("job-capture", { status: "captured" });
         } else if (
           classification.type === "application" ||
           classification.type === "review"
@@ -362,6 +525,10 @@ export default defineContentScript({
             adapterId: activeAtsAdapter(document).id,
           });
           currentSession = readApplicationSession(context);
+          recordDebug("application-context", {
+            status: readContextStatus(context)?.status ?? "missing",
+            sessionId: currentSession?.id,
+          });
           publishContext(readContextStatus(context));
           let resumeAfterSubmitFailure = false;
           if (currentSession?.state === "SUBMITTING") {
@@ -417,7 +584,11 @@ export default defineContentScript({
           }
         }
         lastObservation = signature;
-      } catch {
+      } catch (error) {
+        recordDebug("error", {
+          code: "FIELD_DISCOVERY_FAILED",
+          message: error instanceof Error ? error.message : "Page inspection failed",
+        });
         lastObservation = "";
       }
     }

@@ -13,6 +13,7 @@ import {
   type DocumentImportService,
 } from "../documents/import.js";
 import type { DocumentWorkflowService } from "../documents/workflow.js";
+import type { DocumentStrategyService } from "../documents/strategy.js";
 
 const idParamsSchema = z.object({ id: z.string().uuid() });
 const generateRequestSchema = z.object({
@@ -38,6 +39,7 @@ export function registerDocumentRoutes(
   pairingService: PairingService,
   documents: DocumentImportService,
   workflow?: DocumentWorkflowService,
+  strategy?: DocumentStrategyService,
 ): void {
   app.register(multipart, {
     limits: { fields: 2, files: 1, parts: 3, fileSize: MAX_DOCUMENT_BYTES },
@@ -148,6 +150,31 @@ export function registerDocumentRoutes(
     );
     registerGeneration("/v1/documents/generate/cover-letter", (input) =>
       workflow.generateCoverLetter(input),
+    );
+  }
+  if (strategy !== undefined) {
+    app.post(
+      "/v1/applications/:id/documents/select",
+      { preHandler },
+      async (request, reply) => {
+        const params = idParamsSchema.safeParse(request.params);
+        const body = z.object({ kind: documentKindSchema }).safeParse(request.body);
+        if (!params.success || !body.success) {
+          return reply.code(400).send({
+            error: { code: "VALIDATION_FAILED", message: "Invalid selection request" },
+          });
+        }
+        try {
+          return await strategy.select({
+            applicationId: params.data.id,
+            kind: body.data.kind,
+          });
+        } catch {
+          return reply.code(404).send({
+            error: { code: "UPLOAD_FAILED", message: "Required document unavailable" },
+          });
+        }
+      },
     );
   }
 }

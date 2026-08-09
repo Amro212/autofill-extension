@@ -174,10 +174,61 @@ describe("Panel", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Fill 2 fields" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Autofill Application" }));
     expect(await screen.findByText("Filled 2 fields")).toBeInTheDocument();
     expect(fillPage).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Undo last fill" }));
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     await waitFor(() => expect(undoLast).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows operational application actions and exports a debug bundle", async () => {
+    const scanPage = vi.fn().mockResolvedValue(undefined);
+    const retryFailed = vi.fn().mockResolvedValue({ filled: 1, failed: 0 });
+    const pauseResume = vi.fn().mockResolvedValue(undefined);
+    const exportDebugBundle = vi.fn().mockResolvedValue(undefined);
+    render(
+      <Panel
+        checkHealth={async () => ({ status: "ok" })}
+        pairBackend={vi.fn()}
+        getProfile={async () => profile}
+        updateProfile={vi.fn()}
+        getSettings={async () => settings}
+        updateSettings={vi.fn()}
+        listDocuments={async () => []}
+        uploadDocument={vi.fn()}
+        setDefaultDocument={vi.fn()}
+        detectedFieldCount={4}
+        applicationStatus={{
+          adapterId: "greenhouse",
+          sessionId: "application-1",
+          state: "FILLING",
+          step: "greenhouse-application",
+          selectedDocuments: 1,
+        }}
+        debugStatus={{
+          fieldCount: 4,
+          recentActions: ["scan", "field-action"],
+          errors: ["FIELD_VERIFICATION_FAILED"],
+        }}
+        scanPage={scanPage}
+        retryFailed={retryFailed}
+        pauseResume={pauseResume}
+        exportDebugBundle={exportDebugBundle}
+      />,
+    );
+
+    expect((await screen.findAllByText("greenhouse")).length).toBeGreaterThan(0);
+    expect(screen.getByText("application-1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Scan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry Failed" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export Debug Bundle" }));
+
+    await waitFor(() => {
+      expect(scanPage).toHaveBeenCalledTimes(1);
+      expect(retryFailed).toHaveBeenCalledTimes(1);
+      expect(pauseResume).toHaveBeenCalledTimes(1);
+      expect(exportDebugBundle).toHaveBeenCalledTimes(1);
+    });
   });
 });

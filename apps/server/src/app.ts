@@ -11,6 +11,7 @@ import { registerSettingsRoutes } from "./api/settings.js";
 import type { PairingService } from "./auth/pairing.js";
 import type { DocumentImportService } from "./documents/import.js";
 import type { DocumentWorkflowService } from "./documents/workflow.js";
+import type { DocumentStrategyService } from "./documents/strategy.js";
 import type { ApplicationRepository } from "./repositories/applications.js";
 import type { JobRepository } from "./repositories/jobs.js";
 import type { ProfileRepository } from "./repositories/profile.js";
@@ -20,6 +21,7 @@ export interface BuildAppOptions {
   pairingService: PairingService;
   documentService?: DocumentImportService;
   documentWorkflow?: DocumentWorkflowService;
+  documentStrategy?: DocumentStrategyService;
   applicationRepository?: ApplicationRepository;
   jobRepository?: JobRepository;
   profileRepository?: ProfileRepository;
@@ -81,6 +83,7 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
       options.pairingService,
       options.documentService,
       options.documentWorkflow,
+      options.documentStrategy,
     );
   }
   if (options.profileRepository !== undefined) {

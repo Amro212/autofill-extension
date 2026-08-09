@@ -14,11 +14,14 @@ import { DocumentAiService } from "../src/documents/generation.js";
 import { DocumentImportService } from "../src/documents/import.js";
 import { renderResumePdf } from "../src/documents/render.js";
 import { DocumentStorage } from "../src/documents/storage.js";
+import { DocumentStrategyService } from "../src/documents/strategy.js";
 import { DocumentWorkflowService } from "../src/documents/workflow.js";
 import { CanonicalResumeRepository } from "../src/repositories/canonical-resumes.js";
 import { DocumentRepository } from "../src/repositories/documents.js";
 import { JobRepository } from "../src/repositories/jobs.js";
 import { ProfileRepository } from "../src/repositories/profile.js";
+import { ApplicationRepository } from "../src/repositories/applications.js";
+import { SettingsRepository } from "../src/repositories/settings.js";
 
 const cleanups: Array<() => void> = [];
 
@@ -100,6 +103,40 @@ describe("document workflow", () => {
     );
     expect(documents.list()).toHaveLength(3);
 
+    const applications = new ApplicationRepository(
+      connection.db,
+      new SettingsRepository(connection.db),
+    );
+    const application = applications.create({ jobId: job.id, activeTabIds: [9] });
+    const strategy = new DocumentStrategyService({
+      applications,
+      documents,
+      workflow,
+    });
+    const selectedResume = await strategy.select({
+      applicationId: application.id,
+      kind: "resume",
+    });
+    const selectedLetter = await strategy.select({
+      applicationId: application.id,
+      kind: "cover-letter",
+    });
+    expect(selectedResume).toMatchObject({
+      applicationId: application.id,
+      jobId: job.id,
+      kind: "resume",
+      source: "generated",
+    });
+    expect(selectedLetter).toMatchObject({
+      applicationId: application.id,
+      jobId: job.id,
+      kind: "cover-letter",
+      source: "generated",
+    });
+    await expect(
+      strategy.select({ applicationId: application.id, kind: "resume" }),
+    ).resolves.toMatchObject({ id: selectedResume.id });
+
     const pairing = new PairingService({
       installationId: "document-workflow-test",
       pairingSecret: "setup-secret",
@@ -108,6 +145,7 @@ describe("document workflow", () => {
       logger: false,
       pairingService: pairing,
       documentService: documents,
+      documentStrategy: strategy,
       documentWorkflow: workflow,
     });
     const authorization = `Bearer ${pairing.pair("setup-secret").token}`;
@@ -132,6 +170,14 @@ describe("document workflow", () => {
     expect(letter.json().documents).toEqual([
       expect.objectContaining({ kind: "cover-letter", source: "generated" }),
     ]);
+    const selected = await app.inject({
+      method: "POST",
+      url: `/v1/applications/${application.id}/documents/select`,
+      headers: { authorization },
+      payload: { kind: "resume" },
+    });
+    expect(selected.statusCode).toBe(200);
+    expect(selected.json()).toMatchObject({ id: selectedResume.id });
     await app.close();
   });
 });

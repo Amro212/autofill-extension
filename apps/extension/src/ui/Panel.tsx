@@ -37,6 +37,22 @@ export interface PanelProps {
   detectedFieldCount?: number;
   fillPage?: () => Promise<{ filled: number; failed: number }>;
   undoLast?: () => Promise<unknown>;
+  scanPage?: () => Promise<unknown>;
+  retryFailed?: () => Promise<unknown>;
+  pauseResume?: () => Promise<unknown>;
+  exportDebugBundle?: () => Promise<unknown>;
+  applicationStatus?: {
+    adapterId: string;
+    sessionId?: string;
+    state?: string;
+    step: string;
+    selectedDocuments: number;
+  };
+  debugStatus?: {
+    fieldCount: number;
+    recentActions: string[];
+    errors: string[];
+  };
 }
 
 type PanelState =
@@ -145,45 +161,76 @@ export function Panel(props: PanelProps) {
       )}
       {state.status === "ready" && (
         <>
-          {props.fillPage !== undefined && (
-            <section className="job-copilot-section" aria-label="AI Autofill">
-              <h2>AI Autofill</h2>
-              <button
-                type="button"
-                disabled={
-                  fillStatus.state === "generating" ||
-                  (props.detectedFieldCount ?? 0) === 0
-                }
-                onClick={async () => {
-                  setFillStatus({ state: "generating" });
-                  try {
-                    const result = await props.fillPage!();
-                    setFillStatus({ state: "done", ...result });
-                  } catch {
-                    setFillStatus({ state: "error" });
+          {props.applicationStatus !== undefined && (
+            <section className="job-copilot-section" aria-label="Application">
+              <h2>Application</h2>
+              <dl>
+                <dt>ATS</dt><dd>{props.applicationStatus.adapterId}</dd>
+                <dt>State</dt><dd>{props.applicationStatus.state ?? "DISCOVERED"}</dd>
+                <dt>Current step</dt><dd>{props.applicationStatus.step}</dd>
+                <dt>Detected fields</dt><dd>{props.detectedFieldCount ?? 0}</dd>
+                <dt>Filled fields</dt>
+                <dd>{fillStatus.state === "done" ? fillStatus.filled : 0}</dd>
+                <dt>Failures</dt>
+                <dd>{fillStatus.state === "done" ? fillStatus.failed : 0}</dd>
+                <dt>Selected documents</dt><dd>{props.applicationStatus.selectedDocuments}</dd>
+              </dl>
+            </section>
+          )}
+          {(props.fillPage !== undefined ||
+            props.scanPage !== undefined ||
+            props.retryFailed !== undefined ||
+            props.pauseResume !== undefined ||
+            props.undoLast !== undefined) && (
+            <section className="job-copilot-section" aria-label="Actions">
+              <h2>Actions</h2>
+              {props.fillPage !== undefined && (
+                <button
+                  type="button"
+                  disabled={
+                    fillStatus.state === "generating" ||
+                    (props.detectedFieldCount ?? 0) === 0
                   }
-                }}
-              >
-                {fillStatus.state === "generating"
-                  ? "Generating…"
-                  : `Fill ${props.detectedFieldCount ?? 0} fields`}
-              </button>
+                  onClick={async () => {
+                    setFillStatus({ state: "generating" });
+                    try {
+                      const result = await props.fillPage!();
+                      setFillStatus({ state: "done", ...result });
+                    } catch {
+                      setFillStatus({ state: "error" });
+                    }
+                  }}
+                >
+                  {fillStatus.state === "generating"
+                    ? "Generating…"
+                    : "Autofill Application"}
+                </button>
+              )}
+              {props.scanPage !== undefined && (
+                <button type="button" onClick={() => void props.scanPage?.()}>Scan</button>
+              )}
+              {props.retryFailed !== undefined && (
+                <button type="button" onClick={() => void props.retryFailed?.()}>
+                  Retry Failed
+                </button>
+              )}
+              {props.pauseResume !== undefined && (
+                <button type="button" onClick={() => void props.pauseResume?.()}>
+                  {props.applicationStatus?.state === "PAUSED" ? "Resume" : "Pause"}
+                </button>
+              )}
+              {props.undoLast !== undefined && (
+                <button type="button" onClick={() => void props.undoLast?.()}>
+                  Undo
+                </button>
+              )}
               {fillStatus.state === "done" && (
-                <>
-                  <small role="status">
-                    Filled {fillStatus.filled} fields
-                    {fillStatus.failed === 0 ? "" : ` · ${fillStatus.failed} failed`}
-                  </small>
-                  {props.undoLast !== undefined && (
-                    <button type="button" onClick={() => void props.undoLast?.()}>
-                      Undo last fill
-                    </button>
-                  )}
-                </>
+                <small role="status">
+                  Filled {fillStatus.filled} fields
+                  {fillStatus.failed === 0 ? "" : ` · ${fillStatus.failed} failed`}
+                </small>
               )}
-              {fillStatus.state === "error" && (
-                <small role="alert">AI fill failed</small>
-              )}
+              {fillStatus.state === "error" && <small role="alert">AI fill failed</small>}
             </section>
           )}
           <Profile
@@ -211,6 +258,37 @@ export function Panel(props: PanelProps) {
             uploadDocument={props.uploadDocument}
             setDefaultDocument={props.setDefaultDocument}
           />
+          {props.debugStatus !== undefined && (
+            <section className="job-copilot-section" aria-label="Debug">
+              <h2>Debug</h2>
+              <dl>
+                <dt>Adapter</dt><dd>{props.applicationStatus?.adapterId ?? "generic"}</dd>
+                <dt>Session ID</dt><dd>{props.applicationStatus?.sessionId ?? "none"}</dd>
+                <dt>Field registry</dt><dd>{props.debugStatus.fieldCount}</dd>
+              </dl>
+              <h3>Recent actions</h3>
+              <ul>
+                {props.debugStatus.recentActions.map((action, index) => (
+                  <li key={`${index}-${action}`}>{action}</li>
+                ))}
+              </ul>
+              <h3>Errors</h3>
+              {props.debugStatus.errors.length === 0 ? (
+                <p>None</p>
+              ) : (
+                <ul>
+                  {props.debugStatus.errors.map((error, index) => (
+                    <li key={`${index}-${error}`}>{error}</li>
+                  ))}
+                </ul>
+              )}
+              {props.exportDebugBundle !== undefined && (
+                <button type="button" onClick={() => void props.exportDebugBundle?.()}>
+                  Export Debug Bundle
+                </button>
+              )}
+            </section>
+          )}
         </>
       )}
     </aside>

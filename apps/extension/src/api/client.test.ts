@@ -149,6 +149,29 @@ describe("backend client", () => {
     expect(entries[1]?.[0]).toBe("file");
   });
 
+  it("selects an application-aware document before upload", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ id: "document-1", kind: "resume" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const client = createBackendClient({
+      fetcher,
+      getToken: async () => "paired-token",
+    });
+
+    await client.selectApplicationDocument("application-1", "resume");
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://127.0.0.1:4317/v1/applications/application-1/documents/select",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ kind: "resume" }),
+      }),
+    );
+  });
+
   it("captures a job and starts a tab-linked application session", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
