@@ -1,0 +1,19 @@
+{
+  "name": "job-copilot",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "lint": "oxlint packages",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "oxlint": "^1.77.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
