@@ -7,10 +7,12 @@
   "scripts": {
     "build": "pnpm -r build",
     "lint": "oxlint apps packages",
+    "test:e2e": "playwright test",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^26.2.0",
     "oxlint": "^1.77.0",
     "typescript": "^7.0.2",

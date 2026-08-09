@@ -10,7 +10,7 @@
     "dev:firefox": "wxt -b firefox",
     "postinstall": "wxt prepare",
     "typecheck": "wxt prepare && tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --exclude \"tests/e2e/**\""
   },
   "dependencies": {
     "@job-copilot/contracts": "workspace:*",
