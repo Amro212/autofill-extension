@@ -3,6 +3,7 @@ node_modules/
 .pnpm-store/
 dist/
 .output/
+.wxt/
 coverage/
 playwright-report/
 test-results/

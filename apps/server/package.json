@@ -1,15 +1,21 @@
 {
-  "name": "@job-copilot/contracts",
+  "name": "@job-copilot/server",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": "./src/index.ts",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --exclude \"dist/**\""
   },
   "dependencies": {
+    "@job-copilot/contracts": "workspace:*",
+    "fastify": "^5.11.2",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.11"
   }
 }

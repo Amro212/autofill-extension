@@ -1,0 +1,29 @@
+:host {
+  color-scheme: light;
+}
+
+.job-copilot-panel {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483647;
+  box-sizing: border-box;
+  width: 260px;
+  padding: 14px 16px;
+  border: 1px solid #d7dce3;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 12px 32px rgb(15 23 42 / 18%);
+  color: #172033;
+  font: 14px/1.4 Arial, sans-serif;
+}
+
+.job-copilot-panel strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 15px;
+}
+
+.job-copilot-panel p {
+  margin: 0;
+}
