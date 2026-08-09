@@ -1,20 +1,30 @@
 import {
   buildPageAnswerPrompt,
+  buildCoverLetterPrompt,
   buildRepairPrompt,
   buildRewritePrompt,
+  buildResumeTailorPrompt,
+  parseAndValidateCoverLetter,
   parseAndValidatePageAnswers,
   parseAndValidateRewrite,
+  parseAndValidateTailoredResume,
   type LlmProvider,
   type PagePromptContext,
   type ProviderPrompt,
 } from "@job-copilot/ai-core";
 import {
+  coverLetterRequestSchema,
   pageAnswerRequestSchema,
+  resumeTailorRequestSchema,
   rewriteRequestSchema,
+  type CoverLetterRequest,
+  type CoverLetterResult,
   type PageAnswerRequest,
   type PageAnswerResult,
+  type ResumeTailorRequest,
   type RewriteRequest,
   type RewriteResult,
+  type TailoredResume,
 } from "@job-copilot/contracts";
 
 export interface AiServiceOptions {
@@ -82,5 +92,15 @@ export class AiService {
     return this.#completeValidated(prompt, (raw) =>
       parseAndValidateRewrite(raw, request.field),
     );
+  }
+
+  async tailorResume(input: ResumeTailorRequest): Promise<TailoredResume> {
+    const request = resumeTailorRequestSchema.parse(input);
+    return this.#completeValidated(buildResumeTailorPrompt(request), parseAndValidateTailoredResume);
+  }
+
+  async generateCoverLetter(input: CoverLetterRequest): Promise<CoverLetterResult> {
+    const request = coverLetterRequestSchema.parse(input);
+    return this.#completeValidated(buildCoverLetterPrompt(request), parseAndValidateCoverLetter);
   }
 }

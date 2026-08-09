@@ -10,6 +10,7 @@ import { registerProfileRoutes } from "./api/profile.js";
 import { registerSettingsRoutes } from "./api/settings.js";
 import type { PairingService } from "./auth/pairing.js";
 import type { DocumentImportService } from "./documents/import.js";
+import type { DocumentWorkflowService } from "./documents/workflow.js";
 import type { ApplicationRepository } from "./repositories/applications.js";
 import type { JobRepository } from "./repositories/jobs.js";
 import type { ProfileRepository } from "./repositories/profile.js";
@@ -18,6 +19,7 @@ import type { SettingsRepository } from "./repositories/settings.js";
 export interface BuildAppOptions {
   pairingService: PairingService;
   documentService?: DocumentImportService;
+  documentWorkflow?: DocumentWorkflowService;
   applicationRepository?: ApplicationRepository;
   jobRepository?: JobRepository;
   profileRepository?: ProfileRepository;
@@ -74,7 +76,12 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
     );
   }
   if (options.documentService !== undefined) {
-    registerDocumentRoutes(app, options.pairingService, options.documentService);
+    registerDocumentRoutes(
+      app,
+      options.pairingService,
+      options.documentService,
+      options.documentWorkflow,
+    );
   }
   if (options.profileRepository !== undefined) {
     registerProfileRoutes(app, options.pairingService, options.profileRepository);

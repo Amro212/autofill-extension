@@ -64,10 +64,72 @@ const rewriteResultSchema = {
   required: ["fieldId", "value", "confidence"],
 };
 
+const generatedFactSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    text: { type: "string", minLength: 1, maxLength: 20_000 },
+    sourceFactIds: {
+      type: "array",
+      minItems: 1,
+      items: { type: "string", minLength: 1 },
+    },
+  },
+  required: ["text", "sourceFactIds"],
+};
+
+const tailoredResumeOutputSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    sourceDocumentId: { type: "string", minLength: 1 },
+    promptVersion: { type: "string", minLength: 1 },
+    name: { type: "string", minLength: 1 },
+    summary: generatedFactSchema,
+    sections: {
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          kind: {
+            type: "string",
+            enum: ["header", "summary", "employment", "education", "projects", "skills", "certifications", "other"],
+          },
+          heading: { type: "string", minLength: 1 },
+          bullets: { type: "array", minItems: 1, items: generatedFactSchema },
+        },
+        required: ["kind", "heading", "bullets"],
+      },
+    },
+  },
+  required: ["sourceDocumentId", "promptVersion", "sections"],
+};
+
+const coverLetterOutputSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    promptVersion: { type: "string", minLength: 1 },
+    recipient: { type: "string", minLength: 1 },
+    subject: { type: "string", minLength: 1 },
+    paragraphs: { type: "array", minItems: 1, items: generatedFactSchema },
+  },
+  required: ["promptVersion", "paragraphs"],
+};
+
 function responseSchema(prompt: ProviderPrompt) {
-  return prompt.responseSchemaName === "page-answers"
-    ? { name: "page_answers", schema: pageAnswersSchema }
-    : { name: "rewrite_result", schema: rewriteResultSchema };
+  if (prompt.responseSchemaName === "page-answers") {
+    return { name: "page_answers", schema: pageAnswersSchema };
+  }
+  if (prompt.responseSchemaName === "rewrite-result") {
+    return { name: "rewrite_result", schema: rewriteResultSchema };
+  }
+  if (prompt.responseSchemaName === "tailored-resume") {
+    return { name: "tailored_resume", schema: tailoredResumeOutputSchema };
+  }
+  return { name: "cover_letter", schema: coverLetterOutputSchema };
 }
 
 function responseContent(value: unknown): string | undefined {

@@ -4,6 +4,8 @@ import type {
 } from "@job-copilot/ai-core";
 import type {
   AiAnswerValue,
+  CanonicalResume,
+  JobCapture,
   NormalizedField,
 } from "@job-copilot/contracts";
 
@@ -100,6 +102,67 @@ export class MockProvider implements LlmProvider {
         fieldId: field.id,
         value: `${current.trim()} (rewritten)`,
         confidence: 1,
+      });
+    }
+    if (prompt.task === "tailor-resume") {
+      const canonical = readSection<CanonicalResume>(prompt.user, "CANONICAL_RESUME");
+      const job = readSection<JobCapture>(prompt.user, "JOB_CONTENT");
+      const keywords = new Set(
+        `${job.title ?? ""} ${job.descriptionNormalized ?? ""}`
+          .toLocaleLowerCase()
+          .match(/[a-z0-9+#.]{3,}/g) ?? [],
+      );
+      const ranked = canonical.sections
+        .flatMap((section) => section.facts.map((fact) => ({ section, fact })))
+        .filter(({ section }) => section.kind !== "header")
+        .sort((left, right) => {
+          const score = (text: string) =>
+            (text.toLocaleLowerCase().match(/[a-z0-9+#.]{3,}/g) ?? []).filter((word) =>
+              keywords.has(word),
+            ).length;
+          return score(right.fact.text) - score(left.fact.text);
+        });
+      const grouped = new Map<string, (typeof ranked)[number][]>();
+      for (const item of ranked.slice(0, 12)) {
+        const key = `${item.section.kind}\u0000${item.section.heading}`;
+        grouped.set(key, [...(grouped.get(key) ?? []), item]);
+      }
+      return JSON.stringify({
+        sourceDocumentId: canonical.sourceDocumentId,
+        promptVersion: "resume-tailor-v1",
+        ...(canonical.name === undefined ? {} : { name: canonical.name }),
+        sections: [...grouped.values()].map((items) => ({
+          kind: items[0]!.section.kind,
+          heading: items[0]!.section.heading,
+          bullets: items.map(({ fact }) => ({ text: fact.text, sourceFactIds: [fact.id] })),
+        })),
+      });
+    }
+    if (prompt.task === "generate-cover-letter") {
+      const canonical = readSection<CanonicalResume>(prompt.user, "CANONICAL_RESUME");
+      const job = readSection<JobCapture>(prompt.user, "JOB_CONTENT");
+      const facts = canonical.sections
+        .flatMap(({ facts: sectionFacts }) => sectionFacts)
+        .filter(({ kind }) => kind !== "header");
+      const selected = facts.length === 0
+        ? canonical.sections.flatMap(({ facts: sectionFacts }) => sectionFacts)
+        : facts;
+      const at = (index: number) => selected[index % selected.length]!;
+      return JSON.stringify({
+        promptVersion: "cover-letter-v1",
+        recipient: "Hiring team",
+        subject: `${job.title ?? "Role"} application`,
+        paragraphs: [
+          {
+            text: `I am applying for the ${job.title ?? "role"} at ${job.company ?? "your organization"}. ${at(0).text}`,
+            sourceFactIds: [at(0).id],
+          },
+          { text: at(1).text, sourceFactIds: [at(1).id] },
+          {
+            text: `Thank you for your consideration. ${at(2).text}`,
+            sourceFactIds: [at(2).id],
+          },
+        ],
       });
     }
     const facts = readSection<{ profile?: unknown }>(prompt.user, "APPLICANT_FACTS");

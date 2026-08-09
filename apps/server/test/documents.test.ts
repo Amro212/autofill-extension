@@ -13,6 +13,8 @@ import {
   DocumentImportService,
 } from "../src/documents/import.js";
 import { DocumentStorage, sanitizeDocumentFilename } from "../src/documents/storage.js";
+import { parseResumeText } from "../src/documents/resume-parser.js";
+import { CanonicalResumeRepository } from "../src/repositories/canonical-resumes.js";
 import { DocumentRepository } from "../src/repositories/documents.js";
 
 const cleanups: Array<() => Promise<void> | void> = [];
@@ -111,6 +113,45 @@ describe("secure document library", () => {
     expect(service.list().find((item) => item.id === second.id)?.isDefault).toBe(true);
     expect(service.read(second.id).bytes).toEqual(Buffer.concat([pdf, Buffer.from("-two")]));
   });
+
+  it("persists canonical resumes and generated-document provenance", () => {
+    const { connection, service } = createLibrary();
+    const source = service.import({
+      bytes: pdf,
+      filename: "source.pdf",
+      kind: "resume",
+      mediaType: "application/pdf",
+    });
+    const canonical = parseResumeText(
+      "Ada Lovelace\n\nEXPERIENCE\nBuilt reliable TypeScript services.",
+      source.id,
+    ).canonical;
+    const canonicalResumes = new CanonicalResumeRepository(connection.db);
+    canonicalResumes.upsert(canonical);
+
+    expect(canonicalResumes.getBySourceDocumentId(source.id)).toEqual(canonical);
+
+    const generated = service.storeGenerated({
+      bytes: Buffer.concat([pdf, Buffer.from("-tailored")]),
+      filename: "tailored-resume.pdf",
+      kind: "resume",
+      mediaType: "application/pdf",
+      sourceDocumentId: source.id,
+      applicationId: "application-1",
+      jobId: "job-1",
+      promptVersion: "resume-tailor-v1",
+      tags: ["tailored", "typescript"],
+    });
+
+    expect(generated).toMatchObject({
+      source: "generated",
+      sourceDocumentId: source.id,
+      applicationId: "application-1",
+      jobId: "job-1",
+      promptVersion: "resume-tailor-v1",
+      tags: ["tailored", "typescript"],
+    });
+  });
 });
 
 describe("document API", () => {
@@ -153,4 +194,3 @@ describe("document API", () => {
     expect(Buffer.from(await streamed.arrayBuffer())).toEqual(pdf);
   });
 });
-

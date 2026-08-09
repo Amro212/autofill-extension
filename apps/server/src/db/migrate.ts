@@ -106,6 +106,25 @@ const ANSWER_RECORD_SCHEMA = `
   PRAGMA user_version = 4;
 `;
 
+const DOCUMENT_AI_SCHEMA = `
+  ALTER TABLE documents ADD COLUMN source_document_id TEXT;
+  ALTER TABLE documents ADD COLUMN application_id TEXT;
+  ALTER TABLE documents ADD COLUMN job_id TEXT;
+  ALTER TABLE documents ADD COLUMN prompt_version TEXT;
+  ALTER TABLE documents ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]';
+  CREATE TABLE IF NOT EXISTS canonical_resumes (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    source_document_id TEXT NOT NULL UNIQUE REFERENCES documents(id),
+    data_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS canonical_resumes_user_source_idx
+    ON canonical_resumes(user_id, source_document_id);
+  PRAGMA user_version = 5;
+`;
+
 export function migrateDatabase(connection: DatabaseConnection): void {
   const row = connection.sqlite.prepare("PRAGMA user_version").get() as {
     user_version: number;
@@ -123,5 +142,9 @@ export function migrateDatabase(connection: DatabaseConnection): void {
     connection.sqlite.exec(ANSWER_MEMORY_SCHEMA);
     version = 3;
   }
-  if (version < 4) connection.sqlite.exec(ANSWER_RECORD_SCHEMA);
+  if (version < 4) {
+    connection.sqlite.exec(ANSWER_RECORD_SCHEMA);
+    version = 4;
+  }
+  if (version < 5) connection.sqlite.exec(DOCUMENT_AI_SCHEMA);
 }

@@ -20,6 +20,16 @@ export interface DocumentImportInput {
   filename: string;
   kind: DocumentKind;
   mediaType: DocumentMediaType;
+  sourceDocumentId?: string;
+  applicationId?: string;
+  jobId?: string;
+  promptVersion?: string;
+  tags?: string[];
+}
+
+export interface GeneratedDocumentInput extends DocumentImportInput {
+  sourceDocumentId: string;
+  promptVersion: string;
 }
 
 function matchesSignature(bytes: Buffer, mediaType: DocumentMediaType): boolean {
@@ -42,6 +52,17 @@ export class DocumentImportService {
   ) {}
 
   import(input: DocumentImportInput): DocumentMetadata {
+    return this.#store(input, "uploaded");
+  }
+
+  storeGenerated(input: GeneratedDocumentInput): DocumentMetadata {
+    return this.#store(input, "generated");
+  }
+
+  #store(
+    input: DocumentImportInput | GeneratedDocumentInput,
+    source: "uploaded" | "generated",
+  ): DocumentMetadata {
     const kind = documentKindSchema.parse(input.kind);
     const mediaType = documentMediaTypeSchema.parse(input.mediaType);
     if (input.bytes.length === 0) throw new Error("Document is empty");
@@ -61,12 +82,23 @@ export class DocumentImportService {
     try {
       return this.documents.create({
         kind,
-        source: "uploaded",
+        source,
         originalFilename,
         mediaType: mediaType === DOCX_MEDIA_TYPE ? DOCX_MEDIA_TYPE : "application/pdf",
         sizeBytes: input.bytes.length,
         sha256: createHash("sha256").update(input.bytes).digest("hex"),
         storageKey,
+        ...(source === "generated"
+          ? {
+              sourceDocumentId: input.sourceDocumentId,
+              promptVersion: input.promptVersion,
+              ...(input.applicationId === undefined
+                ? {}
+                : { applicationId: input.applicationId }),
+              ...(input.jobId === undefined ? {} : { jobId: input.jobId }),
+              tags: input.tags ?? [],
+            }
+          : {}),
       });
     } catch (error) {
       this.storage.delete(storageKey);
@@ -89,4 +121,3 @@ export class DocumentImportService {
     return { metadata, bytes: this.storage.read(storageKey) };
   }
 }
-

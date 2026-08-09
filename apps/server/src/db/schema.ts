@@ -70,7 +70,23 @@ export const documents = sqliteTable("documents", {
   sha256: text("sha256").notNull(),
   storageKey: text("storage_key").notNull().unique(),
   isDefault: integer("is_default", { mode: "boolean" }).notNull(),
+  sourceDocumentId: text("source_document_id"),
+  applicationId: text("application_id"),
+  jobId: text("job_id"),
+  promptVersion: text("prompt_version"),
+  tagsJson: text("tags_json").notNull().default("[]"),
   createdAt: text("created_at").notNull(),
+});
+
+export const canonicalResumes = sqliteTable("canonical_resumes", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  sourceDocumentId: text("source_document_id").notNull().unique(),
+  dataJson: text("data_json").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
 });
 
 export const answerMemories = sqliteTable("answer_memories", {

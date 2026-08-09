@@ -6,11 +6,14 @@ import {
   applicantProfileSchema,
   applicationSessionSchema,
   automationSettingsSchema,
+  canonicalResumeSchema,
+  coverLetterResultSchema,
   documentMetadataSchema,
   jobCaptureSchema,
   normalizedFieldSchema,
   pageAnswerRequestSchema,
   pageAnswerResultSchema,
+  tailoredResumeSchema,
   rewriteRequestSchema,
 } from "./index.js";
 
@@ -44,6 +47,54 @@ describe("normalizedFieldSchema", () => {
         currentValue: document,
         evidence: {},
         confidence: 0.8,
+      }),
+    ).toThrow();
+  });
+});
+
+describe("document AI contracts", () => {
+  const fact = {
+    id: "fact-1",
+    kind: "employment" as const,
+    text: "Built TypeScript services at Example Corp",
+    sourceDocumentId: "document-1",
+    sourceExcerpt: "Built TypeScript services at Example Corp",
+  };
+
+  it("retains canonical source facts and unsupported sections", () => {
+    const resume = canonicalResumeSchema.parse({
+      id: "resume-1",
+      sourceDocumentId: "document-1",
+      name: "Ada Lovelace",
+      sections: [{ id: "section-1", kind: "employment", heading: "Experience", facts: [fact] }],
+      unsupportedSections: ["PUBLICATIONS"],
+      extractionWarnings: [],
+      createdAt: "2026-08-09T00:00:00.000Z",
+      updatedAt: "2026-08-09T00:00:00.000Z",
+    });
+
+    expect(resume.sections[0]?.facts[0]?.sourceExcerpt).toContain("TypeScript");
+    expect(resume.unsupportedSections).toEqual(["PUBLICATIONS"]);
+  });
+
+  it("requires every generated resume bullet and letter paragraph to cite source facts", () => {
+    expect(
+      tailoredResumeSchema.parse({
+        sourceDocumentId: "document-1",
+        promptVersion: "resume-tailor-v1",
+        sections: [
+          {
+            kind: "employment",
+            heading: "Experience",
+            bullets: [{ text: fact.text, sourceFactIds: [fact.id] }],
+          },
+        ],
+      }).sections[0]?.bullets[0]?.sourceFactIds,
+    ).toEqual(["fact-1"]);
+    expect(() =>
+      coverLetterResultSchema.parse({
+        promptVersion: "cover-letter-v1",
+        paragraphs: [{ text: "Unsupported claim", sourceFactIds: [] }],
       }),
     ).toThrow();
   });

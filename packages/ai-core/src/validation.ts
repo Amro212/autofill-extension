@@ -1,13 +1,25 @@
 import {
+  coverLetterResultSchema,
   pageAnswerResultSchema,
   rewriteResultSchema,
+  tailoredResumeSchema,
+  type CoverLetterResult,
   type NormalizedField,
   type PageAnswerResult,
   type RewriteResult,
+  type TailoredResume,
 } from "@job-copilot/contracts";
 
 function fail(code: string): never {
   throw new TypeError(code);
+}
+
+export function parseAndValidateTailoredResume(raw: string): TailoredResume {
+  return tailoredResumeSchema.parse(parseJson(raw));
+}
+
+export function parseAndValidateCoverLetter(raw: string): CoverLetterResult {
+  return coverLetterResultSchema.parse(parseJson(raw));
 }
 
 function parseJson(raw: string): unknown {

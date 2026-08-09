@@ -16,6 +16,7 @@ const metadata: DocumentMetadata = {
   sizeBytes: 64,
   sha256: "a".repeat(64),
   isDefault: false,
+  tags: [],
   createdAt: "2026-08-08T12:00:00.000Z",
 };
 
@@ -66,4 +67,3 @@ describe("Documents", () => {
     expect(await screen.findByText("Default")).toBeInTheDocument();
   });
 });
-

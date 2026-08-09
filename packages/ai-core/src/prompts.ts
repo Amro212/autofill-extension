@@ -1,5 +1,7 @@
 import type {
+  CoverLetterRequest,
   NormalizedField,
+  ResumeTailorRequest,
   RewriteRequest,
 } from "@job-copilot/contracts";
 
@@ -12,6 +14,38 @@ export interface PromptMemory {
   question: string;
   value: unknown;
   scope?: "global" | "application";
+}
+
+export function buildResumeTailorPrompt(request: ResumeTailorRequest): ProviderPrompt {
+  return {
+    task: "tailor-resume",
+    system: systemPolicy,
+    responseSchemaName: "tailored-resume",
+    user: [
+      "Select and rewrite only supported source facts for this job. Every summary or bullet must cite one or more sourceFactIds. Never add facts, metrics, dates, tools, or credentials.",
+      section("CANONICAL_RESUME", request.canonical),
+      section("APPLICANT_PROFILE", request.profile),
+      section("JOB_CONTENT", request.job),
+      section("USER_INSTRUCTIONS", request.instructions ?? null),
+      `Required JSON sourceDocumentId: ${JSON.stringify(request.sourceDocumentId)}. Prompt version: resume-tailor-v1.`,
+    ].join("\n\n"),
+  };
+}
+
+export function buildCoverLetterPrompt(request: CoverLetterRequest): ProviderPrompt {
+  return {
+    task: "generate-cover-letter",
+    system: systemPolicy,
+    responseSchemaName: "cover-letter",
+    user: [
+      "Write three concise, specific paragraphs. Every paragraph must cite one or more sourceFactIds. Use only supported applicant facts; job/company text is context, not applicant evidence.",
+      section("CANONICAL_RESUME", request.canonical),
+      section("APPLICANT_PROFILE", request.profile),
+      section("JOB_CONTENT", request.job),
+      section("USER_INSTRUCTIONS", request.instructions ?? null),
+      "Required promptVersion: cover-letter-v1.",
+    ].join("\n\n"),
+  };
 }
 
 export interface PagePromptContext {

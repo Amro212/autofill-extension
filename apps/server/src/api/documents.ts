@@ -12,8 +12,16 @@ import {
   MAX_DOCUMENT_BYTES,
   type DocumentImportService,
 } from "../documents/import.js";
+import type { DocumentWorkflowService } from "../documents/workflow.js";
 
 const idParamsSchema = z.object({ id: z.string().uuid() });
+const generateRequestSchema = z.object({
+  sourceDocumentId: z.string().uuid(),
+  jobId: z.string().uuid(),
+  applicationId: z.string().min(1).optional(),
+  format: z.enum(["pdf", "docx", "both"]).default("both"),
+  instructions: z.string().trim().min(1).max(2_000).optional(),
+});
 
 function fieldValue(
   fields: Record<string, unknown>,
@@ -29,6 +37,7 @@ export function registerDocumentRoutes(
   app: FastifyInstance,
   pairingService: PairingService,
   documents: DocumentImportService,
+  workflow?: DocumentWorkflowService,
 ): void {
   app.register(multipart, {
     limits: { fields: 2, files: 1, parts: 3, fileSize: MAX_DOCUMENT_BYTES },
@@ -95,5 +104,50 @@ export function registerDocumentRoutes(
       return reply.code(404).send();
     }
   });
+  if (workflow !== undefined) {
+    app.post("/v1/documents/:id/parse", { preHandler }, async (request, reply) => {
+      const parsed = idParamsSchema.safeParse(request.params);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: { code: "VALIDATION_FAILED", message: "Invalid document ID" },
+        });
+      }
+      try {
+        return await workflow.parseResume(parsed.data.id);
+      } catch {
+        return reply.code(422).send({
+          error: { code: "DOCUMENT_PARSE_FAILED", message: "Resume parsing failed" },
+        });
+      }
+    });
+    const registerGeneration = (
+      path: string,
+      generate: (input: z.infer<typeof generateRequestSchema>) => Promise<unknown>,
+    ) => {
+      app.post(path, { preHandler }, async (request, reply) => {
+        const parsed = generateRequestSchema.safeParse(request.body);
+        if (!parsed.success) {
+          return reply.code(400).send({
+            error: { code: "VALIDATION_FAILED", message: "Invalid generation request" },
+          });
+        }
+        try {
+          return reply.code(201).send(await generate(parsed.data));
+        } catch {
+          return reply.code(422).send({
+            error: {
+              code: "DOCUMENT_GENERATION_FAILED",
+              message: "Document generation failed",
+            },
+          });
+        }
+      });
+    };
+    registerGeneration("/v1/documents/generate/resume", (input) =>
+      workflow.generateResume(input),
+    );
+    registerGeneration("/v1/documents/generate/cover-letter", (input) =>
+      workflow.generateCoverLetter(input),
+    );
+  }
 }
-

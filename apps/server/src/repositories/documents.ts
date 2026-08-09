@@ -20,21 +20,46 @@ export interface NewDocumentRecord {
   sizeBytes: number;
   sha256: string;
   storageKey: string;
+  sourceDocumentId?: string;
+  applicationId?: string;
+  jobId?: string;
+  promptVersion?: string;
+  tags?: string[];
 }
 
 export interface StoredDocument extends DocumentMetadata {
   storageKey: string;
 }
 
+function metadataFromRow(row: typeof documents.$inferSelect): DocumentMetadata {
+  const {
+    storageKey: _storageKey,
+    tagsJson,
+    sourceDocumentId,
+    applicationId,
+    jobId,
+    promptVersion,
+    ...metadata
+  } = row;
+  return documentMetadataSchema.parse({
+    ...metadata,
+    tags: JSON.parse(tagsJson),
+    ...(sourceDocumentId === null ? {} : { sourceDocumentId }),
+    ...(applicationId === null ? {} : { applicationId }),
+    ...(jobId === null ? {} : { jobId }),
+    ...(promptVersion === null ? {} : { promptVersion }),
+  });
+}
+
 function toStoredDocument(row: typeof documents.$inferSelect): StoredDocument {
   return {
-    ...documentMetadataSchema.parse(row),
+    ...metadataFromRow(row),
     storageKey: row.storageKey,
   };
 }
 
 function toMetadata(row: typeof documents.$inferSelect): DocumentMetadata {
-  return documentMetadataSchema.parse(row);
+  return metadataFromRow(row);
 }
 
 export class DocumentRepository {
@@ -52,15 +77,17 @@ export class DocumentRepository {
         .from(documents)
         .where(and(eq(documents.userId, this.#userId), eq(documents.kind, input.kind)))
         .get() === undefined;
+    const { tags = [], ...record } = input;
     const row: typeof documents.$inferInsert = {
       id: randomUUID(),
       userId: this.#userId,
-      ...input,
+      ...record,
+      tagsJson: JSON.stringify(tags),
       isDefault,
       createdAt,
     };
     this.db.insert(documents).values(row).run();
-    return documentMetadataSchema.parse(row);
+    return toMetadata(row as typeof documents.$inferSelect);
   }
 
   list(): DocumentMetadata[] {
@@ -103,4 +130,3 @@ export class DocumentRepository {
     return documentMetadataSchema.parse({ ...target, isDefault: true });
   }
 }
-

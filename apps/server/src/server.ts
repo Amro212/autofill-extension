@@ -10,9 +10,12 @@ import { buildApp } from "./app.js";
 import { openDatabase } from "./db/client.js";
 import { migrateDatabase } from "./db/migrate.js";
 import { DocumentImportService } from "./documents/import.js";
+import { DocumentAiService } from "./documents/generation.js";
 import { DocumentStorage } from "./documents/storage.js";
+import { DocumentWorkflowService } from "./documents/workflow.js";
 import { AnswerMemoryRepository } from "./memory/repository.js";
 import { DocumentRepository } from "./repositories/documents.js";
+import { CanonicalResumeRepository } from "./repositories/canonical-resumes.js";
 import { ApplicationRepository } from "./repositories/applications.js";
 import { AnswerRecordRepository } from "./repositories/answers.js";
 import { JobRepository } from "./repositories/jobs.js";
@@ -79,10 +82,18 @@ export function createServerRuntime(env: NodeJS.ProcessEnv = process.env) {
     aiConfig.kind === "openrouter"
       ? new OpenRouterProvider(aiConfig)
       : new MockProvider();
+  const aiService = new AiService(aiProvider);
+  const documentWorkflow = new DocumentWorkflowService({
+    canonicalResumes: new CanonicalResumeRepository(connection.db),
+    documents: documentService,
+    generator: new DocumentAiService(aiService),
+    jobs: jobRepository,
+    profiles: profileRepository,
+  });
   const app = buildApp({
     applicationRepository,
     ai: {
-      service: new AiService(aiProvider),
+      service: aiService,
       profiles: profileRepository,
       applications: applicationRepository,
       jobs: jobRepository,
@@ -90,6 +101,7 @@ export function createServerRuntime(env: NodeJS.ProcessEnv = process.env) {
       answers: new AnswerRecordRepository(connection.db),
     },
     documentService,
+    documentWorkflow,
     jobRepository,
     pairingService,
     profileRepository,
