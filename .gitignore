@@ -1,0 +1,38 @@
+# Dependencies and build output
+node_modules/
+.pnpm-store/
+dist/
+.output/
+coverage/
+playwright-report/
+test-results/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Local implementation references and worktrees
+references/
+.worktrees/
+
+# Local runtime and private artifacts
+data/
+uploads/
+generated-documents/
+debug-bundles/
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+*.tsbuildinfo

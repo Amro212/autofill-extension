@@ -1,0 +1,32 @@
+{
+  "kit_name": "Job Copilot Implementation Kit",
+  "generated": "2026-08-08",
+  "files": [
+    "AI_AND_DOCUMENTS.md",
+    "APPLICATION_STATE_MACHINE.md",
+    "ARCHITECTURE.md",
+    "DATA_CONTRACTS.md",
+    "FIELD_ENGINE.md",
+    "IMPLEMENTATION_PHASES.md",
+    "MASTER_AGENT_PROMPT.md",
+    "README.md",
+    "SECURITY.md",
+    "SOURCE_REUSE_AUDIT.md",
+    "TECHNICAL_NOTES.md",
+    "TESTING_AND_ACCEPTANCE.md"
+  ],
+  "locked_decisions": {
+    "browser_framework": "WXT + React + TypeScript",
+    "backend": "Local Node.js + TypeScript",
+    "backend_auth": "Mandatory per-installation pairing token",
+    "default_start": "Manual Autofill Application trigger",
+    "autopilot_available": true,
+    "auto_continue_default": true,
+    "auto_submit_default": false,
+    "resume_tailoring_in_scope": true,
+    "cover_letter_generation_in_scope": true,
+    "runtime_external_browser_automation": false,
+    "playwright_for_testing": true,
+    "default_ai_model_target": "Gemini 3.5 Flash Lite via OpenRouter; resolve exact current slug during implementation"
+  }
+}
