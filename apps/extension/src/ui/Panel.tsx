@@ -1,14 +1,18 @@
 import type {
   ApplicantProfile,
   ApplicantProfileUpdate,
+  AnswerMemory,
   AutomationSettings,
   AutomationSettingsUpdate,
   DocumentKind,
   DocumentMetadata,
+  ResumeParseResult,
+  RuntimeConfig,
 } from "@job-copilot/contracts";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 
 import { Documents } from "./Documents.js";
+import { Memory } from "./Memory.js";
 import { Profile } from "./Profile.js";
 import { Settings } from "./Settings.js";
 
@@ -27,6 +31,9 @@ export interface PanelProps {
     kind: DocumentKind;
   }) => Promise<DocumentMetadata>;
   setDefaultDocument: (id: string) => Promise<DocumentMetadata>;
+  parseResume?: (id: string) => Promise<ResumeParseResult>;
+  listMemories?: () => Promise<AnswerMemory[]>;
+  getRuntimeConfig?: () => Promise<RuntimeConfig>;
   contextStatus?:
     | { status: "matched"; label: string }
     | {
@@ -245,6 +252,9 @@ export function Panel(props: PanelProps) {
           />
           <Settings
             settings={state.settings}
+            {...(props.getRuntimeConfig === undefined
+              ? {}
+              : { getRuntimeConfig: props.getRuntimeConfig })}
             onSave={async (update) => {
               const settings = await props.updateSettings(update);
               setState((current) =>
@@ -257,7 +267,34 @@ export function Panel(props: PanelProps) {
             listDocuments={props.listDocuments}
             uploadDocument={props.uploadDocument}
             setDefaultDocument={props.setDefaultDocument}
+            {...(props.parseResume === undefined ? {} : { parseResume: props.parseResume })}
+            onProfileSuggestions={(suggestions: ApplicantProfileUpdate) => {
+              setState((current) => {
+                if (current.status !== "ready") return current;
+                return {
+                  ...current,
+                  profile: {
+                    ...current.profile,
+                    identity: { ...current.profile.identity, ...suggestions.identity },
+                    contact: { ...current.profile.contact, ...suggestions.contact },
+                    education: suggestions.education ?? current.profile.education,
+                    employment: suggestions.employment ?? current.profile.employment,
+                    projects: suggestions.projects ?? current.profile.projects,
+                    skills: suggestions.skills ?? current.profile.skills,
+                    certifications:
+                      suggestions.certifications ?? current.profile.certifications,
+                    eligibility: suggestions.eligibility ?? current.profile.eligibility,
+                    preferences: {
+                      ...current.profile.preferences,
+                      ...suggestions.preferences,
+                    },
+                    customFacts: suggestions.customFacts ?? current.profile.customFacts,
+                  },
+                };
+              });
+            }}
           />
+          {props.listMemories !== undefined && <Memory listMemories={props.listMemories} />}
           {props.debugStatus !== undefined && (
             <section className="job-copilot-section" aria-label="Debug">
               <h2>Debug</h2>

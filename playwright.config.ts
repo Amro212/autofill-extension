@@ -7,9 +7,12 @@ export default defineConfig({
   reporter: "line",
   use: {
     baseURL: "http://127.0.0.1:4173",
-    channel: "chrome",
     headless: true,
   },
+  projects: [
+    { name: "chromium", use: { channel: "chrome" } },
+    { name: "firefox", use: { browserName: "firefox" } },
+  ],
   webServer: {
     command:
       "pnpm --filter @job-copilot/extension exec vite tests/fixtures/execution --host 127.0.0.1 --port 4173 --strictPort",

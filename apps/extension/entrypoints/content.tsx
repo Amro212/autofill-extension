@@ -372,6 +372,8 @@ export default defineContentScript({
           update,
         }),
       getSettings: () => browser.runtime.sendMessage("JOB_COPILOT_GET_SETTINGS"),
+      getRuntimeConfig: () => browser.runtime.sendMessage("JOB_COPILOT_GET_RUNTIME_CONFIG"),
+      listMemories: () => browser.runtime.sendMessage("JOB_COPILOT_GET_MEMORIES"),
       updateSettings: (update) =>
         browser.runtime.sendMessage({
           type: "JOB_COPILOT_UPDATE_SETTINGS",
@@ -389,6 +391,11 @@ export default defineContentScript({
       setDefaultDocument: (id) =>
         browser.runtime.sendMessage({
           type: "JOB_COPILOT_SET_DEFAULT_DOCUMENT",
+          id,
+        }),
+      parseResume: (id) =>
+        browser.runtime.sendMessage({
+          type: "JOB_COPILOT_PARSE_RESUME",
           id,
         }),
       fillPage: () => runPageAutomation(),

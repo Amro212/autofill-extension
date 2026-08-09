@@ -1,6 +1,7 @@
 import type {
   ApplicantProfile,
   ApplicantProfileUpdate,
+  AnswerMemory,
   ApplicationCreate,
   ApplicationSession,
   ApplicationState,
@@ -15,6 +16,8 @@ import type {
   PageAnswerResult,
   RewriteRequest,
   RewriteResult,
+  ResumeParseResult,
+  RuntimeConfig,
 } from "@job-copilot/contracts";
 
 export interface BackendClientOptions {
@@ -90,6 +93,10 @@ export function createBackendClient(options: BackendClientOptions) {
       }),
     getSettings: () =>
       request<AutomationSettings>("/v1/settings", { authenticated: true }),
+    getRuntimeConfig: () =>
+      request<RuntimeConfig>("/v1/runtime-config", { authenticated: true }),
+    getMemories: () =>
+      request<AnswerMemory[]>("/v1/memories", { authenticated: true }),
     updateSettings: (settings: AutomationSettingsUpdate) =>
       request<AutomationSettings>("/v1/settings", {
         authenticated: true,
@@ -98,6 +105,11 @@ export function createBackendClient(options: BackendClientOptions) {
       }),
     getDocuments: () =>
       request<DocumentMetadata[]>("/v1/documents", { authenticated: true }),
+    parseResume: (id: string) =>
+      request<ResumeParseResult>(`/v1/documents/${encodeURIComponent(id)}/parse`, {
+        authenticated: true,
+        method: "POST",
+      }),
     selectApplicationDocument: (applicationId: string, kind: DocumentKind) =>
       request<DocumentMetadata>(
         `/v1/applications/${encodeURIComponent(applicationId)}/documents/select`,

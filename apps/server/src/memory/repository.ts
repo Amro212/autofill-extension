@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { jsonValueSchema, type JsonValue } from "@job-copilot/contracts";
 
 import type { JobCopilotDatabase } from "../db/client.js";
@@ -88,6 +88,16 @@ export class AnswerMemoryRepository {
       )
       .all();
     return rankMemories(rows.map(fromRow), { ...context, signature });
+  }
+
+  list(): MemoryCandidate[] {
+    return this.db
+      .select()
+      .from(answerMemories)
+      .where(eq(answerMemories.userId, this.#userId))
+      .orderBy(desc(answerMemories.updatedAt))
+      .all()
+      .map(fromRow);
   }
 
   markUsed(id: string): void {

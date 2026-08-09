@@ -1,19 +1,6 @@
-import type { JsonValue } from "@job-copilot/contracts";
+import type { AnswerMemory } from "@job-copilot/contracts";
 
-export interface MemoryCandidate {
-  id: string;
-  signature: string;
-  normalizedQuestion: string;
-  value: JsonValue;
-  scope: "global" | "application";
-  domain?: string | undefined;
-  sourceApplicationId?: string | undefined;
-  pinned: boolean;
-  usageCount: number;
-  lastUsedAt?: string | undefined;
-  createdAt: string;
-  updatedAt: string;
-}
+export type MemoryCandidate = AnswerMemory;
 
 export interface MemoryRankingContext {
   signature: string;

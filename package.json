@@ -1,10 +1,15 @@
 {
   "name": "job-copilot",
+  "version": "1.0.0",
   "private": true,
   "engines": {
     "node": ">=22"
   },
   "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "dev:server": "pnpm --dir apps/server dev",
+    "start:server": "pnpm --dir apps/server start",
+    "backup": "node scripts/backup.mjs",
     "build": "pnpm -r build",
     "lint": "oxlint apps packages",
     "test:e2e": "playwright test",

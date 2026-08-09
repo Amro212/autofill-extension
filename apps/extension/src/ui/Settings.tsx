@@ -1,12 +1,14 @@
 import type {
   AutomationSettings,
   AutomationSettingsUpdate,
+  RuntimeConfig,
 } from "@job-copilot/contracts";
 import { type FormEvent, useEffect, useState } from "react";
 
 export interface SettingsProps {
   settings: AutomationSettings;
   onSave: (update: AutomationSettingsUpdate) => Promise<AutomationSettings>;
+  getRuntimeConfig?: () => Promise<RuntimeConfig>;
 }
 
 const toggleLabels = {
@@ -16,12 +18,18 @@ const toggleLabels = {
   autopilot: "Autopilot",
 } as const;
 
-export function Settings({ settings, onSave }: SettingsProps) {
+export function Settings({ settings, onSave, getRuntimeConfig }: SettingsProps) {
   const [draft, setDraft] = useState(settings);
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">(
     "idle",
   );
   useEffect(() => setDraft(settings), [settings]);
+  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig>();
+  useEffect(() => {
+    let active = true;
+    getRuntimeConfig?.().then((config) => { if (active) setRuntimeConfig(config); });
+    return () => { active = false; };
+  }, [getRuntimeConfig]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -61,10 +69,17 @@ export function Settings({ settings, onSave }: SettingsProps) {
           </label>
         );
       })}
+      <h3>AI and documents</h3>
+      <dl>
+        <dt>Provider</dt><dd>{runtimeConfig?.provider ?? "Loading…"}</dd>
+        <dt>Model</dt><dd>{runtimeConfig?.model ?? "Loading…"}</dd>
+        <dt>Generation</dt><dd>One page batch</dd>
+        <dt>Schema repair retries</dt><dd>{runtimeConfig?.schemaRepairAttempts ?? "Loading…"}</dd>
+        <dt>Document policy</dt><dd>Reuse, generate, then default fallback</dd>
+      </dl>
       <button type="submit" disabled={status === "saving"}>Save settings</button>
       {status === "saved" && <small role="status">Settings saved</small>}
       {status === "error" && <small role="alert">Could not save settings</small>}
     </form>
   );
 }
-

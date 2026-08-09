@@ -90,6 +90,21 @@ export const answerRecordSchema = z
   })
   .strict();
 
+export const answerMemorySchema = z.object({
+  id: z.string().min(1),
+  signature: z.string().min(1),
+  normalizedQuestion: z.string().min(1),
+  value: jsonValueSchema,
+  scope: z.enum(["global", "application"]),
+  domain: z.string().min(1).optional(),
+  sourceApplicationId: z.string().min(1).optional(),
+  pinned: z.boolean(),
+  usageCount: z.number().int().nonnegative(),
+  lastUsedAt: z.iso.datetime().optional(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+
 export type AiAnswerValue = z.infer<typeof aiAnswerValueSchema>;
 export type FieldAnswer = z.infer<typeof fieldAnswerSchema>;
 export type PageAnswerRequest = z.infer<typeof pageAnswerRequestSchema>;
@@ -98,3 +113,4 @@ export type RewriteRequest = z.infer<typeof rewriteRequestSchema>;
 export type RewriteResult = z.infer<typeof rewriteResultSchema>;
 export type AnswerSource = z.infer<typeof answerSourceSchema>;
 export type AnswerRecord = z.infer<typeof answerRecordSchema>;
+export type AnswerMemory = z.infer<typeof answerMemorySchema>;

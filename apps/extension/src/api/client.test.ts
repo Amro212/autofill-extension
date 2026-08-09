@@ -302,4 +302,24 @@ describe("backend client", () => {
       }),
     );
   });
+
+  it("parses a resume through the authenticated document API", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ text: "Ada", canonical: {}, profileSuggestions: {} }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const client = createBackendClient({ fetcher, getToken: async () => "token" });
+
+    await client.parseResume("document 1");
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://127.0.0.1:4317/v1/documents/document%201/parse",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ authorization: "Bearer token" }),
+      }),
+    );
+  });
 });

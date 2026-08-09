@@ -21,6 +21,7 @@ references/
 
 # Local runtime and private artifacts
 data/
+backups/
 uploads/
 !apps/extension/src/uploads/
 !apps/extension/src/uploads/**

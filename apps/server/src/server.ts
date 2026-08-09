@@ -112,6 +112,13 @@ export function createServerRuntime(env: NodeJS.ProcessEnv = process.env) {
     jobRepository,
     pairingService,
     profileRepository,
+    runtimeConfig: {
+      provider: aiConfig.kind,
+      model: aiConfig.model,
+      schemaRepairAttempts: 1,
+      generationBehavior: "page-batch",
+      documentPolicy: "reuse-generate-fallback",
+    },
     settingsRepository,
   });
   app.addHook("onClose", () => connection.close());

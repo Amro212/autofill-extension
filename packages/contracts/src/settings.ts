@@ -19,3 +19,12 @@ export type AutomationSettingsUpdate = z.infer<
   typeof automationSettingsUpdateSchema
 >;
 
+export const runtimeConfigSchema = z.object({
+  provider: z.enum(["mock", "openrouter"]),
+  model: z.string().min(1).max(256),
+  schemaRepairAttempts: z.number().int().min(0).max(5),
+  generationBehavior: z.literal("page-batch"),
+  documentPolicy: z.literal("reuse-generate-fallback"),
+});
+
+export type RuntimeConfig = z.infer<typeof runtimeConfigSchema>;

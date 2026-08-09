@@ -172,6 +172,23 @@ export default defineBackground(() => {
         }));
       }
       if (
+        message.type === "JOB_COPILOT_GET_RUNTIME_CONFIG"
+      ) {
+        return client.getRuntimeConfig();
+      }
+      if (
+        message.type === "JOB_COPILOT_GET_MEMORIES"
+      ) {
+        return client.getMemories();
+      }
+      if (
+        message.type === "JOB_COPILOT_PARSE_RESUME" &&
+        "id" in message &&
+        typeof message.id === "string"
+      ) {
+        return client.parseResume(message.id);
+      }
+      if (
         message.type === "JOB_COPILOT_SET_DEFAULT_DOCUMENT" &&
         "id" in message &&
         typeof message.id === "string"

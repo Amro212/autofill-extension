@@ -73,6 +73,27 @@ afterEach(async () => {
 });
 
 describe("AI API", () => {
+  it("lists stored answer memory for user review", async () => {
+    const { app, authorization } = await createAuthenticatedApp();
+    await app.inject({
+      method: "POST",
+      url: "/v1/ai/pages/answer",
+      headers: { authorization },
+      payload: { pageKey: "apply", fields: [firstNameField()] },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/v1/memories",
+      headers: { authorization },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([
+      expect.objectContaining({ normalizedQuestion: "first name", scope: "global" }),
+    ]);
+  });
+
   it("loads applicant facts on the backend and answers a page once", async () => {
     const { app, authorization } = await createAuthenticatedApp();
     const response = await app.inject({

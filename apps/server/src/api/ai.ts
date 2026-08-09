@@ -52,6 +52,8 @@ export function registerAiRoutes(
 ): void {
   const preHandler = createAuthGuard(pairingService);
 
+  app.get("/v1/memories", { preHandler }, async () => dependencies.memories.list());
+
   function contextFor(
     fields: NormalizedField[],
     applicationId: string | undefined,

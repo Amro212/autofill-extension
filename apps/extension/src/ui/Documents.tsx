@@ -1,4 +1,9 @@
-import type { DocumentKind, DocumentMetadata } from "@job-copilot/contracts";
+import type {
+  ApplicantProfileUpdate,
+  DocumentKind,
+  DocumentMetadata,
+  ResumeParseResult,
+} from "@job-copilot/contracts";
 import { type FormEvent, useEffect, useState } from "react";
 
 const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
@@ -10,6 +15,8 @@ export interface DocumentsProps {
     kind: DocumentKind;
   }) => Promise<DocumentMetadata>;
   setDefaultDocument: (id: string) => Promise<DocumentMetadata>;
+  parseResume?: (id: string) => Promise<ResumeParseResult>;
+  onProfileSuggestions?: (suggestions: ApplicantProfileUpdate) => void;
 }
 
 export function Documents(props: DocumentsProps) {
@@ -19,6 +26,7 @@ export function Documents(props: DocumentsProps) {
   const [status, setStatus] = useState<"loading" | "ready" | "saving" | "error">(
     "loading",
   );
+  const [suggestionsLoaded, setSuggestionsLoaded] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -70,6 +78,20 @@ export function Documents(props: DocumentsProps) {
     }
   }
 
+  async function reviewSuggestions(id: string) {
+    if (props.parseResume === undefined) return;
+    setStatus("saving");
+    setSuggestionsLoaded(false);
+    try {
+      const parsed = await props.parseResume(id);
+      props.onProfileSuggestions?.(parsed.profileSuggestions);
+      setSuggestionsLoaded(true);
+      setStatus("ready");
+    } catch {
+      setStatus("error");
+    }
+  }
+
   return (
     <section className="job-copilot-section">
       <h2>Documents</h2>
@@ -83,6 +105,11 @@ export function Documents(props: DocumentsProps) {
             ) : (
               <button type="button" onClick={() => makeDefault(document.id)}>
                 Make default
+              </button>
+            )}
+            {document.kind === "resume" && props.parseResume !== undefined && (
+              <button type="button" onClick={() => void reviewSuggestions(document.id)}>
+                Review profile suggestions
               </button>
             )}
           </li>
@@ -110,8 +137,10 @@ export function Documents(props: DocumentsProps) {
           Upload document
         </button>
       </form>
+      {suggestionsLoaded && (
+        <small role="status">Suggestions loaded. Review and save Profile.</small>
+      )}
       {status === "error" && <small role="alert">Document action failed</small>}
     </section>
   );
 }
-

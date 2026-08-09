@@ -16,6 +16,7 @@ import type { ApplicationRepository } from "./repositories/applications.js";
 import type { JobRepository } from "./repositories/jobs.js";
 import type { ProfileRepository } from "./repositories/profile.js";
 import type { SettingsRepository } from "./repositories/settings.js";
+import type { RuntimeConfig } from "@job-copilot/contracts";
 
 export interface BuildAppOptions {
   pairingService: PairingService;
@@ -26,6 +27,7 @@ export interface BuildAppOptions {
   jobRepository?: JobRepository;
   profileRepository?: ProfileRepository;
   settingsRepository?: SettingsRepository;
+  runtimeConfig?: RuntimeConfig;
   ai?: AiRouteDependencies;
   logger?: boolean;
 }
@@ -90,7 +92,12 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
     registerProfileRoutes(app, options.pairingService, options.profileRepository);
   }
   if (options.settingsRepository !== undefined) {
-    registerSettingsRoutes(app, options.pairingService, options.settingsRepository);
+    registerSettingsRoutes(
+      app,
+      options.pairingService,
+      options.settingsRepository,
+      options.runtimeConfig,
+    );
   }
   return app;
 }

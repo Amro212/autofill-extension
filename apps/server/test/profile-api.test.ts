@@ -25,6 +25,13 @@ async function createAuthenticatedApp() {
     logger: false,
     pairingService,
     profileRepository: new ProfileRepository(connection.db),
+    runtimeConfig: {
+      provider: "mock",
+      model: "test-model",
+      schemaRepairAttempts: 1,
+      generationBehavior: "page-batch",
+      documentPolicy: "reuse-generate-fallback",
+    },
     settingsRepository: new SettingsRepository(connection.db),
   });
   cleanups.push(async () => {
@@ -108,5 +115,22 @@ describe("profile and settings API", () => {
     });
     expect(updated.json()).toMatchObject({ autoContinue: false, autoSubmit: true });
   });
-});
 
+  it("exposes non-secret runtime AI and document policy", async () => {
+    const { app, authorization } = await createAuthenticatedApp();
+    const response = await app.inject({
+      method: "GET",
+      url: "/v1/runtime-config",
+      headers: { authorization },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      provider: "mock",
+      model: "test-model",
+      schemaRepairAttempts: 1,
+      generationBehavior: "page-batch",
+      documentPolicy: "reuse-generate-fallback",
+    });
+  });
+});
