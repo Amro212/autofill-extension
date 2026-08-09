@@ -8,6 +8,8 @@ import { migrateDatabase } from "./db/migrate.js";
 import { DocumentImportService } from "./documents/import.js";
 import { DocumentStorage } from "./documents/storage.js";
 import { DocumentRepository } from "./repositories/documents.js";
+import { ApplicationRepository } from "./repositories/applications.js";
+import { JobRepository } from "./repositories/jobs.js";
 import { InstallationRepository } from "./repositories/installation.js";
 import { ProfileRepository } from "./repositories/profile.js";
 import { SettingsRepository } from "./repositories/settings.js";
@@ -58,11 +60,17 @@ export function createServerRuntime(env: NodeJS.ProcessEnv = process.env) {
     new DocumentStorage(join(dataDirectory, "uploads")),
     new DocumentRepository(connection.db),
   );
+  const settingsRepository = new SettingsRepository(connection.db);
   const app = buildApp({
+    applicationRepository: new ApplicationRepository(
+      connection.db,
+      settingsRepository,
+    ),
     documentService,
+    jobRepository: new JobRepository(connection.db),
     pairingService,
     profileRepository: new ProfileRepository(connection.db),
-    settingsRepository: new SettingsRepository(connection.db),
+    settingsRepository,
   });
   app.addHook("onClose", () => connection.close());
   return {

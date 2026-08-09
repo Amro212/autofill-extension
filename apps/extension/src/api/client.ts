@@ -1,10 +1,14 @@
 import type {
   ApplicantProfile,
   ApplicantProfileUpdate,
+  ApplicationCreate,
+  ApplicationSession,
   AutomationSettings,
   AutomationSettingsUpdate,
   DocumentKind,
   DocumentMetadata,
+  JobCapture,
+  JobRecord,
 } from "@job-copilot/contracts";
 
 export interface BackendClientOptions {
@@ -107,5 +111,25 @@ export function createBackendClient(options: BackendClientOptions) {
       }
       return result;
     },
+    captureJob: (job: JobCapture) =>
+      request<JobRecord>("/v1/jobs", {
+        authenticated: true,
+        method: "POST",
+        body: job,
+      }),
+    createApplication: (application: ApplicationCreate) =>
+      request<ApplicationSession>("/v1/applications", {
+        authenticated: true,
+        method: "POST",
+        body: application,
+      }),
+    getApplication: (id: string) =>
+      request<ApplicationSession>(`/v1/applications/${id}`, {
+        authenticated: true,
+      }),
+    getApplicationByTab: (tabId: number) =>
+      request<ApplicationSession>(`/v1/applications/by-tab/${tabId}`, {
+        authenticated: true,
+      }),
   };
 }

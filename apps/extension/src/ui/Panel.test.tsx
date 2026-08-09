@@ -124,4 +124,33 @@ describe("Panel", () => {
     await waitFor(() => expect(pairBackend).toHaveBeenCalledWith("one-time-secret"));
     expect(await screen.findByLabelText("First name")).toHaveValue("Ada");
   });
+
+  it("surfaces ambiguous job context as one compact confirmation", async () => {
+    const confirmJobContext = vi.fn().mockResolvedValue(undefined);
+    render(
+      <Panel
+        checkHealth={async () => ({ status: "ok" })}
+        pairBackend={vi.fn()}
+        getProfile={async () => profile}
+        updateProfile={vi.fn()}
+        getSettings={async () => settings}
+        updateSettings={vi.fn()}
+        listDocuments={async () => []}
+        uploadDocument={vi.fn()}
+        setDefaultDocument={vi.fn()}
+        contextStatus={{
+          status: "ambiguous",
+          candidates: [
+            { jobId: "job-1", label: "Engineer · Example Corp" },
+            { jobId: "job-2", label: "Designer · Example Corp" },
+          ],
+        }}
+        confirmJobContext={confirmJobContext}
+      />,
+    );
+
+    expect(await screen.findByText("Which captured job is this for?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Engineer · Example Corp" }));
+    await waitFor(() => expect(confirmJobContext).toHaveBeenCalledWith("job-1"));
+  });
 });

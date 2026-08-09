@@ -6,6 +6,7 @@ import {
   applicationSessionSchema,
   automationSettingsSchema,
   documentMetadataSchema,
+  jobCaptureSchema,
   normalizedFieldSchema,
 } from "./index.js";
 
@@ -144,5 +145,20 @@ describe("documentMetadataSchema", () => {
     });
 
     expect(document).not.toHaveProperty("storageKey");
+  });
+});
+
+describe("jobCaptureSchema", () => {
+  it("normalizes absent job sections to stable arrays", () => {
+    const job = jobCaptureSchema.parse({
+      title: "Engineer",
+      listingUrl: "https://example.test/jobs/1",
+    });
+    expect(job.requirements).toEqual([]);
+    expect(job.responsibilities).toEqual([]);
+  });
+
+  it("rejects an empty capture", () => {
+    expect(() => jobCaptureSchema.parse({})).toThrow();
   });
 });

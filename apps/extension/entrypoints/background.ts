@@ -4,12 +4,33 @@ import {
   automationSettingsUpdateSchema,
   documentKindSchema,
   documentMediaTypeSchema,
+  jobCaptureSchema,
+  type JobRecord,
 } from "@job-copilot/contracts";
 
 import { createBackendClient } from "../src/api/client.js";
+import {
+  correlateJobContext,
+  type ApplicationContext,
+  type PendingJobContext,
+} from "../src/jobs/correlate.js";
+import { SessionController } from "../src/sessions/controller.js";
 
 const TOKEN_KEY = "job-copilot:pairing-token";
 const MAX_BASE64_DOCUMENT_LENGTH = 13_981_020;
+const PENDING_JOBS_KEY = "job-copilot:pending-jobs";
+const TAB_SESSIONS_KEY = "job-copilot:tab-sessions";
+const PENDING_TTL_MS = 30 * 60 * 1_000;
+
+interface StoredPendingJob extends PendingJobContext {
+  label: string;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : {};
+}
 
 export default defineBackground(() => {
   const client = createBackendClient({
@@ -21,8 +42,57 @@ export default defineBackground(() => {
       await browser.storage.local.set({ [TOKEN_KEY]: token });
     },
   });
+  const tabStore = {
+    async get(tabId: number) {
+      const stored = await browser.storage.local.get(TAB_SESSIONS_KEY);
+      const map = asRecord(stored[TAB_SESSIONS_KEY]);
+      return typeof map[String(tabId)] === "string"
+        ? (map[String(tabId)] as string)
+        : null;
+    },
+    async set(tabId: number, applicationId: string) {
+      const stored = await browser.storage.local.get(TAB_SESSIONS_KEY);
+      const map = asRecord(stored[TAB_SESSIONS_KEY]);
+      await browser.storage.local.set({
+        [TAB_SESSIONS_KEY]: { ...map, [String(tabId)]: applicationId },
+      });
+    },
+  };
+  const sessions = new SessionController(client, tabStore);
 
-  browser.runtime.onMessage.addListener((message: unknown) => {
+  async function readPendingJobs(): Promise<StoredPendingJob[]> {
+    const stored = await browser.storage.local.get(PENDING_JOBS_KEY);
+    if (!Array.isArray(stored[PENDING_JOBS_KEY])) return [];
+    const cutoff = Date.now() - PENDING_TTL_MS;
+    return (stored[PENDING_JOBS_KEY] as StoredPendingJob[]).filter(
+      (job) => Date.parse(job.capturedAt) >= cutoff,
+    );
+  }
+
+  async function rememberJob(job: JobRecord, sourceTabId: number) {
+    const current = await readPendingJobs();
+    const pending: StoredPendingJob = {
+      jobId: job.id,
+      sourceTabId,
+      capturedAt: job.capturedAt,
+      label: [job.title, job.company].filter(Boolean).join(" · ") || "Captured job",
+      ...(job.applicationUrl === undefined
+        ? {}
+        : { applicationUrl: job.applicationUrl }),
+      ...(job.company === undefined ? {} : { company: job.company }),
+      ...(job.title === undefined ? {} : { title: job.title }),
+    };
+    const deduplicated = current.filter(
+      (candidate) =>
+        candidate.jobId !== job.id &&
+        candidate.applicationUrl !== job.applicationUrl,
+    );
+    await browser.storage.local.set({
+      [PENDING_JOBS_KEY]: [pending, ...deduplicated].slice(0, 20),
+    });
+  }
+
+  browser.runtime.onMessage.addListener((message: unknown, sender) => {
     if (message === "JOB_COPILOT_HEALTH") return client.health();
     if (message === "JOB_COPILOT_GET_PROFILE") return client.getProfile();
     if (message === "JOB_COPILOT_GET_SETTINGS") return client.getSettings();
@@ -73,6 +143,107 @@ export default defineBackground(() => {
           filename: message.filename,
           kind: kind.data,
         });
+      }
+      if (message.type === "JOB_COPILOT_CAPTURE_JOB" && "job" in message) {
+        const job = jobCaptureSchema.safeParse(message.job);
+        const sourceTabId = sender.tab?.id;
+        if (!job.success || sourceTabId === undefined) return undefined;
+        return client.captureJob(job.data).then(async (captured) => {
+          await rememberJob(captured, sourceTabId);
+          return captured;
+        });
+      }
+      if (
+        message.type === "JOB_COPILOT_APPLICATION_PAGE" &&
+        "url" in message &&
+        typeof message.url === "string" &&
+        sender.tab?.id !== undefined
+      ) {
+        const target: ApplicationContext = {
+          tabId: sender.tab.id,
+          url: message.url,
+          ...(sender.tab.openerTabId === undefined
+            ? {}
+            : { openerTabId: sender.tab.openerTabId }),
+          ...("company" in message && typeof message.company === "string"
+            ? { company: message.company }
+            : {}),
+          ...("title" in message && typeof message.title === "string"
+            ? { title: message.title }
+            : {}),
+          ...("jobId" in message && typeof message.jobId === "string"
+            ? { jobId: message.jobId }
+            : {}),
+        };
+        return readPendingJobs().then(async (pending) => {
+          const correlation = correlateJobContext(pending, target);
+          if (correlation.status === "ambiguous") {
+            return {
+              ...correlation,
+              candidates: correlation.jobIds.flatMap((jobId) => {
+                const job = pending.find((candidate) => candidate.jobId === jobId);
+                return job === undefined ? [] : [{ jobId, label: job.label }];
+              }),
+            };
+          }
+          if (correlation.status !== "matched") return correlation;
+          const matched = pending.find((job) => job.jobId === correlation.jobId);
+          try {
+            const recovered = await sessions.recover(target.tabId);
+            return {
+              ...correlation,
+              label: matched?.label ?? "Captured job",
+              session: recovered,
+            };
+          } catch {
+            const source = matched;
+            const activeTabIds = [...new Set([
+              ...(source === undefined ? [] : [source.sourceTabId]),
+              target.tabId,
+            ])];
+            const session = await sessions.start({
+              jobId: correlation.jobId,
+              ...(source === undefined
+                ? {}
+                : { originatingTabId: source.sourceTabId }),
+              activeTabIds,
+            });
+            return {
+              ...correlation,
+              label: source?.label ?? "Captured job",
+              session,
+            };
+          }
+        });
+      }
+      if (
+        message.type === "JOB_COPILOT_CONFIRM_JOB_CONTEXT" &&
+        "jobId" in message &&
+        typeof message.jobId === "string" &&
+        sender.tab?.id !== undefined
+      ) {
+        return readPendingJobs().then(async (pending) => {
+          const source = pending.find((job) => job.jobId === message.jobId);
+          if (source === undefined) throw new Error("Pending job context expired");
+          const tabId = sender.tab!.id!;
+          const session = await sessions.start({
+            jobId: source.jobId,
+            originatingTabId: source.sourceTabId,
+            activeTabIds: [...new Set([source.sourceTabId, tabId])],
+          });
+          return {
+            status: "matched" as const,
+            jobId: source.jobId,
+            label: source.label,
+            session,
+          };
+        });
+      }
+      if (
+        message.type === "JOB_COPILOT_RECOVER_SESSION" &&
+        sender.tab?.id !== undefined
+      ) {
+        return sessions.recover(sender.tab.id);
       }
     }
     return undefined;

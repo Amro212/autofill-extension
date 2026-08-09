@@ -148,4 +148,43 @@ describe("backend client", () => {
     expect(entries[0]).toEqual(["kind", "resume"]);
     expect(entries[1]?.[0]).toBe("file");
   });
+
+  it("captures a job and starts a tab-linked application session", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "job-1", title: "Engineer" }), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "application-1", state: "DISCOVERED" }), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    const client = createBackendClient({
+      fetcher,
+      getToken: async () => "paired-token",
+    });
+
+    await client.captureJob({ title: "Engineer" });
+    await client.createApplication({
+      jobId: "job-1",
+      originatingTabId: 1,
+      activeTabIds: [1, 2],
+    });
+
+    expect(fetcher).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:4317/v1/jobs",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:4317/v1/applications",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
 });

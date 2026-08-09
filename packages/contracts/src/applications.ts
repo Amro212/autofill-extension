@@ -39,5 +39,12 @@ export const applicationSessionSchema = z.object({
   autopilot: z.boolean().default(false),
 });
 
+export const applicationCreateSchema = z.object({
+  jobId: z.string().min(1).optional(),
+  originatingTabId: z.number().int().nonnegative().optional(),
+  activeTabIds: z.array(z.number().int().nonnegative()).default([]),
+});
+
 export type ApplicationState = z.infer<typeof applicationStateSchema>;
 export type ApplicationSession = z.infer<typeof applicationSessionSchema>;
+export type ApplicationCreate = z.input<typeof applicationCreateSchema>;

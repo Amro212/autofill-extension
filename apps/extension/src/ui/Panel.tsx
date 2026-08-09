@@ -27,6 +27,13 @@ export interface PanelProps {
     kind: DocumentKind;
   }) => Promise<DocumentMetadata>;
   setDefaultDocument: (id: string) => Promise<DocumentMetadata>;
+  contextStatus?:
+    | { status: "matched"; label: string }
+    | {
+        status: "ambiguous";
+        candidates: Array<{ jobId: string; label: string }>;
+      };
+  confirmJobContext?: (jobId: string) => Promise<unknown>;
 }
 
 type PanelState =
@@ -90,6 +97,25 @@ export function Panel(props: PanelProps) {
         <strong>Job Copilot</strong>
         <span data-state={state.status}>{state.status}</span>
       </header>
+      {props.contextStatus?.status === "matched" && (
+        <p className="job-copilot-context" role="status">
+          Job: {props.contextStatus.label}
+        </p>
+      )}
+      {props.contextStatus?.status === "ambiguous" && (
+        <div className="job-copilot-context" role="group" aria-label="Confirm job context">
+          <span>Which captured job is this for?</span>
+          {props.contextStatus.candidates.map((candidate) => (
+            <button
+              type="button"
+              key={candidate.jobId}
+              onClick={() => props.confirmJobContext?.(candidate.jobId)}
+            >
+              {candidate.label}
+            </button>
+          ))}
+        </div>
+      )}
       {state.status === "loading" && <p>Connecting…</p>}
       {state.status === "offline" && <p>Start the local Job Copilot service.</p>}
       {state.status === "unpaired" && (
