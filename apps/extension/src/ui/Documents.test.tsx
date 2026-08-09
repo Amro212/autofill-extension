@@ -110,4 +110,32 @@ describe("Documents", () => {
     expect(onProfileSuggestions).toHaveBeenCalledWith(parsed.profileSuggestions);
     expect(await screen.findByText("Suggestions loaded. Review and save Profile.")).toBeInTheDocument();
   });
+
+  it("generates tailored resume and cover-letter variants from a source resume", async () => {
+    const tailored = { ...metadata, id: "tailored-1", source: "generated" as const };
+    const letter = {
+      ...metadata,
+      id: "letter-1",
+      kind: "cover-letter" as const,
+      source: "generated" as const,
+      originalFilename: "cover-letter.pdf",
+    };
+    const generateResume = vi.fn().mockResolvedValue([tailored]);
+    const generateCoverLetter = vi.fn().mockResolvedValue([letter]);
+    render(
+      <Documents
+        listDocuments={async () => [metadata]}
+        uploadDocument={vi.fn()}
+        setDefaultDocument={vi.fn()}
+        generateResume={generateResume}
+        generateCoverLetter={generateCoverLetter}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Generate tailored resume" }));
+    await waitFor(() => expect(generateResume).toHaveBeenCalledWith(metadata.id));
+    fireEvent.click(screen.getByRole("button", { name: "Generate cover letter" }));
+    await waitFor(() => expect(generateCoverLetter).toHaveBeenCalledWith(metadata.id));
+    expect(await screen.findByText("cover-letter.pdf")).toBeInTheDocument();
+  });
 });

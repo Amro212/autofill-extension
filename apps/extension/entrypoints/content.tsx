@@ -398,6 +398,26 @@ export default defineContentScript({
           type: "JOB_COPILOT_PARSE_RESUME",
           id,
         }),
+      generateResume: async (sourceDocumentId) => {
+        if (currentSession?.jobId === undefined) throw new Error("Capture job context first");
+        const result = await browser.runtime.sendMessage({
+          type: "JOB_COPILOT_GENERATE_RESUME",
+          sourceDocumentId,
+          jobId: currentSession.jobId,
+          applicationId: currentSession.id,
+        });
+        return result.documents;
+      },
+      generateCoverLetter: async (sourceDocumentId) => {
+        if (currentSession?.jobId === undefined) throw new Error("Capture job context first");
+        const result = await browser.runtime.sendMessage({
+          type: "JOB_COPILOT_GENERATE_COVER_LETTER",
+          sourceDocumentId,
+          jobId: currentSession.jobId,
+          applicationId: currentSession.id,
+        });
+        return result.documents;
+      },
       fillPage: () => runPageAutomation(),
       undoLast: () => fillController.undoLast(),
       scanPage: async () => {

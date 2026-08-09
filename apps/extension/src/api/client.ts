@@ -110,6 +110,26 @@ export function createBackendClient(options: BackendClientOptions) {
         authenticated: true,
         method: "POST",
       }),
+    generateResume: (input: {
+      sourceDocumentId: string;
+      jobId: string;
+      applicationId?: string;
+    }) =>
+      request<{ documents: DocumentMetadata[] }>("/v1/documents/generate/resume", {
+        authenticated: true,
+        method: "POST",
+        body: { ...input, format: "both" },
+      }),
+    generateCoverLetter: (input: {
+      sourceDocumentId: string;
+      jobId: string;
+      applicationId?: string;
+    }) =>
+      request<{ documents: DocumentMetadata[] }>("/v1/documents/generate/cover-letter", {
+        authenticated: true,
+        method: "POST",
+        body: { ...input, format: "both" },
+      }),
     selectApplicationDocument: (applicationId: string, kind: DocumentKind) =>
       request<DocumentMetadata>(
         `/v1/applications/${encodeURIComponent(applicationId)}/documents/select`,

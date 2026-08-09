@@ -172,6 +172,25 @@ export default defineBackground(() => {
         }));
       }
       if (
+        (message.type === "JOB_COPILOT_GENERATE_RESUME" ||
+          message.type === "JOB_COPILOT_GENERATE_COVER_LETTER") &&
+        "sourceDocumentId" in message &&
+        typeof message.sourceDocumentId === "string" &&
+        "jobId" in message &&
+        typeof message.jobId === "string"
+      ) {
+        const input = {
+          sourceDocumentId: message.sourceDocumentId,
+          jobId: message.jobId,
+          ...("applicationId" in message && typeof message.applicationId === "string"
+            ? { applicationId: message.applicationId }
+            : {}),
+        };
+        return message.type === "JOB_COPILOT_GENERATE_RESUME"
+          ? client.generateResume(input)
+          : client.generateCoverLetter(input);
+      }
+      if (
         message.type === "JOB_COPILOT_GET_RUNTIME_CONFIG"
       ) {
         return client.getRuntimeConfig();

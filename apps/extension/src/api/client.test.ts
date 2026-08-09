@@ -322,4 +322,31 @@ describe("backend client", () => {
       }),
     );
   });
+
+  it("requests contextual resume and cover-letter generation", async () => {
+    const fetcher = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify({ documents: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const client = createBackendClient({ fetcher, getToken: async () => "token" });
+    const input = {
+      sourceDocumentId: "document-1",
+      jobId: "job-1",
+      applicationId: "application-1",
+    };
+
+    await client.generateResume(input);
+    await client.generateCoverLetter(input);
+
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      "http://127.0.0.1:4317/v1/documents/generate/resume",
+      "http://127.0.0.1:4317/v1/documents/generate/cover-letter",
+    ]);
+    expect(JSON.parse(fetcher.mock.calls[0]![1]!.body as string)).toEqual({
+      ...input,
+      format: "both",
+    });
+  });
 });

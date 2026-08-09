@@ -17,6 +17,8 @@ export interface DocumentsProps {
   setDefaultDocument: (id: string) => Promise<DocumentMetadata>;
   parseResume?: (id: string) => Promise<ResumeParseResult>;
   onProfileSuggestions?: (suggestions: ApplicantProfileUpdate) => void;
+  generateResume?: (sourceDocumentId: string) => Promise<DocumentMetadata[]>;
+  generateCoverLetter?: (sourceDocumentId: string) => Promise<DocumentMetadata[]>;
 }
 
 export function Documents(props: DocumentsProps) {
@@ -92,6 +94,24 @@ export function Documents(props: DocumentsProps) {
     }
   }
 
+  async function generate(
+    id: string,
+    action: ((sourceDocumentId: string) => Promise<DocumentMetadata[]>) | undefined,
+  ) {
+    if (action === undefined) return;
+    setStatus("saving");
+    try {
+      const generated = await action(id);
+      setDocuments((current) => [
+        ...current.filter((document) => !generated.some(({ id: nextId }) => nextId === document.id)),
+        ...generated,
+      ]);
+      setStatus("ready");
+    } catch {
+      setStatus("error");
+    }
+  }
+
   return (
     <section className="job-copilot-section">
       <h2>Documents</h2>
@@ -111,6 +131,23 @@ export function Documents(props: DocumentsProps) {
               <button type="button" onClick={() => void reviewSuggestions(document.id)}>
                 Review profile suggestions
               </button>
+            )}
+            {document.kind === "resume" && document.source === "uploaded" && (
+              <>
+                {props.generateResume !== undefined && (
+                  <button type="button" onClick={() => void generate(document.id, props.generateResume)}>
+                    Generate tailored resume
+                  </button>
+                )}
+                {props.generateCoverLetter !== undefined && (
+                  <button
+                    type="button"
+                    onClick={() => void generate(document.id, props.generateCoverLetter)}
+                  >
+                    Generate cover letter
+                  </button>
+                )}
+              </>
             )}
           </li>
         ))}

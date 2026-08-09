@@ -85,6 +85,7 @@ describe("Panel", () => {
     const autoSubmit = await screen.findByLabelText("Auto Submit");
     expect(autoSubmit).not.toBeChecked();
     fireEvent.click(autoSubmit);
+    await waitFor(() => expect(autoSubmit).toBeChecked());
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() =>

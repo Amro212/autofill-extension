@@ -34,6 +34,8 @@ export interface PanelProps {
   parseResume?: (id: string) => Promise<ResumeParseResult>;
   listMemories?: () => Promise<AnswerMemory[]>;
   getRuntimeConfig?: () => Promise<RuntimeConfig>;
+  generateResume?: (sourceDocumentId: string) => Promise<DocumentMetadata[]>;
+  generateCoverLetter?: (sourceDocumentId: string) => Promise<DocumentMetadata[]>;
   contextStatus?:
     | { status: "matched"; label: string }
     | {
@@ -293,6 +295,12 @@ export function Panel(props: PanelProps) {
                 };
               });
             }}
+            {...(props.generateResume === undefined
+              ? {}
+              : { generateResume: props.generateResume })}
+            {...(props.generateCoverLetter === undefined
+              ? {}
+              : { generateCoverLetter: props.generateCoverLetter })}
           />
           {props.listMemories !== undefined && <Memory listMemories={props.listMemories} />}
           {props.debugStatus !== undefined && (
