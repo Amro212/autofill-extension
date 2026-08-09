@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+  <body>
+    <main id="main">
+      <h1>Software Engineer</h1>
+      <h2>Apply for this job</h2>
+      <form id="application-form">
+        <label for="first_name">First Name*</label><input id="first_name" aria-label="First Name" required>
+        <label for="question_1">Work authorization*</label><input id="question_1" role="combobox" aria-labelledby="authorization-label" aria-controls="authorization-options" required><span id="authorization-label">Work authorization</span><div id="authorization-options" role="listbox"><div role="option">Yes</div><div role="option">No</div></div>
+        <label for="available">Available date</label><input id="available" type="date">
+        <label for="resume">Resume/CV*</label><input id="resume" type="file" accept=".pdf,.doc,.docx,.txt,.rtf" required>
+        <div id="first-name-error" role="alert">First Name is required</div>
+        <button type="submit">Submit application</button>
+      </form>
+    </main>
+  </body>
+</html>

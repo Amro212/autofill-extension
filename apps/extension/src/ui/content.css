@@ -1,0 +1,164 @@
+:host {
+  color-scheme: light;
+}
+
+.job-copilot-panel {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483647;
+  box-sizing: border-box;
+  width: 300px;
+  max-height: min(620px, calc(100vh - 32px));
+  overflow: auto;
+  padding: 14px 16px;
+  border: 1px solid #d7dce3;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 12px 32px rgb(15 23 42 / 18%);
+  color: #172033;
+  font: 14px/1.4 Arial, sans-serif;
+}
+
+.job-copilot-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.job-copilot-panel strong {
+  font-size: 15px;
+}
+
+.job-copilot-panel header span {
+  color: #516078;
+  font-size: 12px;
+  text-transform: capitalize;
+}
+
+.job-copilot-panel p {
+  margin: 0;
+}
+
+.job-copilot-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: #f1f4ff;
+  color: #2443a4;
+  font-size: 12px;
+}
+
+.job-copilot-context button {
+  padding: 3px 5px;
+  border: 1px solid #b9c6f7;
+  border-radius: 4px;
+  background: #fff;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.job-copilot-section {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #e7eaf0;
+  margin-top: 12px;
+}
+
+.job-copilot-section h2 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.job-copilot-section label:not(.job-copilot-toggle) {
+  display: grid;
+  gap: 3px;
+  color: #516078;
+  font-size: 12px;
+}
+
+.job-copilot-section input:not([type="checkbox"]) {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid #c9d0da;
+  border-radius: 6px;
+  background: #fff;
+  color: #172033;
+  font: inherit;
+}
+
+.job-copilot-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.job-copilot-section button {
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: #3157d5;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+}
+
+.job-copilot-section small {
+  color: #516078;
+}
+
+.job-copilot-documents {
+  display: grid;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.job-copilot-documents li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.job-copilot-documents li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-copilot-documents li button {
+  flex: none;
+  padding: 4px 6px;
+  background: #e8edff;
+  color: #2443a4;
+  font-size: 11px;
+}
+
+.job-copilot-document-upload {
+  display: grid;
+  gap: 8px;
+}
+
+.job-copilot-document-upload label {
+  display: grid;
+  gap: 3px;
+  color: #516078;
+  font-size: 12px;
+}
+
+.job-copilot-document-upload select {
+  padding: 6px;
+  border: 1px solid #c9d0da;
+  border-radius: 6px;
+  background: #fff;
+  color: #172033;
+}

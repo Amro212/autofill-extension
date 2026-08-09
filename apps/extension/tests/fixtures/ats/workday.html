@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+  <body>
+    <main data-automation-id="applyFlowPage">
+      <h2 data-automation-id="jobTitleHeading">Software Engineer</h2>
+      <ol data-automation-id="progressBar"><li data-automation-id="progressBarActiveStep">My Information</li></ol>
+      <section aria-label="My Information">
+        <div data-automation-id="formField-firstName"><label for="first-name">First Name</label><input id="first-name" required></div>
+        <div data-automation-id="formField-country"><label id="country-label" for="country">Country</label><input id="country" role="combobox" aria-labelledby="country-label" aria-controls="country-options"><div id="country-options" role="listbox"><div role="option">Canada</div><div role="option">United States</div></div></div>
+        <div data-automation-id="formField-startDate"><label for="start-date">Start Date</label><input id="start-date" type="date"></div>
+        <section aria-label="Work Experience"><div><label for="company-1">Company</label><input id="company-1"></div><div><label for="company-2">Company</label><input id="company-2"></div></section>
+        <div data-automation-id="formField-resume"><label for="resume">Resume</label><input id="resume" type="file" accept=".pdf,.docx"></div>
+        <input data-automation-id="beecatcher" aria-label="Enter website. This input is for robots only" type="text">
+        <div role="alert"><a href="#first-name">Enter your first name</a></div>
+      </section>
+      <button data-automation-id="bottom-navigation-next-button">Save and Continue</button>
+    </main>
+  </body>
+</html>

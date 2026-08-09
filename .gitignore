@@ -3,6 +3,7 @@ node_modules/
 .pnpm-store/
 dist/
 .output/
+.wxt/
 coverage/
 playwright-report/
 test-results/
@@ -20,7 +21,10 @@ references/
 
 # Local runtime and private artifacts
 data/
+backups/
 uploads/
+!apps/extension/src/uploads/
+!apps/extension/src/uploads/**
 generated-documents/
 debug-bundles/
 *.sqlite
