@@ -129,6 +129,14 @@ describe("job and application API", () => {
     expect(recovered.statusCode).toBe(200);
     expect(recovered.json()).toMatchObject({ jobId: job.id, activeTabIds: [7, 9] });
 
+    const missing = await app.inject({
+      method: "GET",
+      url: "/v1/applications/by-tab/999",
+      headers: { authorization },
+    });
+    expect(missing.statusCode).toBe(200);
+    expect(missing.json()).toBeNull();
+
     const transitioned = await app.inject({
       method: "PATCH",
       url: `/v1/applications/${created.json<{ id: string }>().id}/state`,

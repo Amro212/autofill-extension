@@ -16,7 +16,14 @@ export function Memory({ listMemories }: MemoryProps) {
   useEffect(() => {
     let active = true;
     listMemories().then(
-      (memories) => active && setItems(memories),
+      (memories) => {
+        if (!active) return;
+        if (!Array.isArray(memories)) {
+          setFailed(true);
+          return;
+        }
+        setItems(memories);
+      },
       () => active && setFailed(true),
     );
     return () => { active = false; };

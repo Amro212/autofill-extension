@@ -34,7 +34,7 @@ export function registerApplicationRoutes(
       const parsed = tabParamsSchema.safeParse(request.params);
       if (!parsed.success) return reply.code(400).send();
       const session = applications.findByTab(parsed.data.tabId);
-      return session === undefined ? reply.code(404).send() : session;
+      return session ?? null;
     },
   );
   app.get("/v1/applications/:id", { preHandler }, async (request, reply) => {

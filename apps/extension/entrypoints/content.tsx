@@ -1,3 +1,4 @@
+import "@job-copilot/contracts/validation";
 import { browser, createShadowRootUi, defineContentScript } from "#imports";
 import {
   applicationSessionSchema,
@@ -28,9 +29,11 @@ import {
 import { observeMutations } from "../src/observer/mutations.js";
 import { mutationMayChangeApplication } from "../src/observer/relevance.js";
 import { observeRoutes } from "../src/observer/routes.js";
+import { ObservationSignature } from "../src/observer/signature.js";
 import { classifyPage } from "../src/page-classifier/index.js";
 import { uploadFile } from "../src/uploads/controller.js";
 import { Panel, type PanelProps } from "../src/ui/Panel.js";
+import { keepUiMounted } from "../src/ui/lifecycle.js";
 import { inspectValidation } from "../src/validation/inspect.js";
 import { ValidationRepairController } from "../src/validation/repair.js";
 
@@ -111,7 +114,7 @@ export default defineContentScript({
   matches: ["http://*/*", "https://*/*"],
   cssInjectionMode: "ui",
   async main(ctx) {
-    let lastObservation = "";
+    const observationSignature = new ObservationSignature();
     const fields = new NormalizedFieldRegistry();
     const journal = new DebugJournal();
     const selectedDocumentIds = new Set<string>();
@@ -345,7 +348,7 @@ export default defineContentScript({
       })().finally(() => {
         automationPromise = undefined;
         if (resume) {
-          lastObservation = "";
+          observationSignature.reset();
           queueMicrotask(() => void inspectPage());
         }
       });
@@ -361,7 +364,7 @@ export default defineContentScript({
           type: "PAIR_BACKEND",
           pairingSecret,
         });
-        lastObservation = "";
+        observationSignature.reset();
         await inspectPage();
         return paired;
       },
@@ -421,7 +424,7 @@ export default defineContentScript({
       fillPage: () => runPageAutomation(),
       undoLast: () => fillController.undoLast(),
       scanPage: async () => {
-        lastObservation = "";
+        observationSignature.reset();
         await inspectPage();
       },
       retryFailed: () => runPageAutomation(),
@@ -534,7 +537,7 @@ export default defineContentScript({
         pathname: location.pathname,
       });
       const signature = `${location.href}|${classification.type}`;
-      if (signature === lastObservation) return;
+      if (!observationSignature.claim(signature)) return;
       try {
         if (classification.type === "job-listing") {
           await browser.runtime.sendMessage({
@@ -610,13 +613,12 @@ export default defineContentScript({
             void runPageAutomation();
           }
         }
-        lastObservation = signature;
       } catch (error) {
         recordDebug("error", {
           code: "FIELD_DISCOVERY_FAILED",
           message: error instanceof Error ? error.message : "Page inspection failed",
         });
-        lastObservation = "";
+        observationSignature.retry(signature);
       }
     }
 
@@ -636,14 +638,15 @@ export default defineContentScript({
         root?.unmount();
       },
     });
-    ui.mount();
-    const stopMutations = observeMutations(document.body, (batch) => {
+    const stopUiMount = keepUiMounted(ui, document);
+    const stopMutations = observeMutations(document.documentElement, (batch) => {
       if (mutationMayChangeApplication(batch)) void inspectPage();
     });
     const stopRoutes = observeRoutes(window, () => void inspectPage());
     ctx.onInvalidated(() => {
       stopMutations();
       stopRoutes();
+      stopUiMount();
       mainWorldBridge?.dispose();
     });
     await inspectPage();

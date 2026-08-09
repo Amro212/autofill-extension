@@ -9,6 +9,11 @@
       "types": "./src/index.ts",
       "development": "./src/index.ts",
       "default": "./dist/index.js"
+    },
+    "./validation": {
+      "types": "./src/validation.ts",
+      "development": "./src/validation.ts",
+      "default": "./dist/validation.js"
     }
   },
   "scripts": {

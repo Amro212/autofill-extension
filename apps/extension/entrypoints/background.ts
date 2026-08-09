@@ -1,3 +1,4 @@
+import "@job-copilot/contracts/validation";
 import { browser, defineBackground } from "#imports";
 import {
   applicantProfileUpdateSchema,
@@ -109,6 +110,8 @@ export default defineBackground(() => {
     if (message === "JOB_COPILOT_GET_PROFILE") return client.getProfile();
     if (message === "JOB_COPILOT_GET_SETTINGS") return client.getSettings();
     if (message === "JOB_COPILOT_GET_DOCUMENTS") return client.getDocuments();
+    if (message === "JOB_COPILOT_GET_RUNTIME_CONFIG") return client.getRuntimeConfig();
+    if (message === "JOB_COPILOT_GET_MEMORIES") return client.getMemories();
     if (
       typeof message === "object" &&
       message !== null &&
@@ -189,16 +192,6 @@ export default defineBackground(() => {
         return message.type === "JOB_COPILOT_GENERATE_RESUME"
           ? client.generateResume(input)
           : client.generateCoverLetter(input);
-      }
-      if (
-        message.type === "JOB_COPILOT_GET_RUNTIME_CONFIG"
-      ) {
-        return client.getRuntimeConfig();
-      }
-      if (
-        message.type === "JOB_COPILOT_GET_MEMORIES"
-      ) {
-        return client.getMemories();
       }
       if (
         message.type === "JOB_COPILOT_PARSE_RESUME" &&
@@ -283,33 +276,32 @@ export default defineBackground(() => {
           }
           if (correlation.status !== "matched") return correlation;
           const matched = pending.find((job) => job.jobId === correlation.jobId);
-          try {
-            const recovered = await sessions.recover(target.tabId);
+          const recovered = await sessions.recover(target.tabId);
+          if (recovered !== undefined) {
             return {
               ...correlation,
               label: matched?.label ?? "Captured job",
               session: recovered,
             };
-          } catch {
-            const source = matched;
-            const activeTabIds = [...new Set([
-              ...(source === undefined ? [] : [source.sourceTabId]),
-              target.tabId,
-            ])];
-            const session = await sessions.start({
-              jobId: correlation.jobId,
-              ...(source === undefined
-                ? {}
-                : { originatingTabId: source.sourceTabId }),
-              activeTabIds,
-              ...(adapterId === undefined ? {} : { adapterId }),
-            });
-            return {
-              ...correlation,
-              label: source?.label ?? "Captured job",
-              session,
-            };
           }
+          const source = matched;
+          const activeTabIds = [...new Set([
+            ...(source === undefined ? [] : [source.sourceTabId]),
+            target.tabId,
+          ])];
+          const session = await sessions.start({
+            jobId: correlation.jobId,
+            ...(source === undefined
+              ? {}
+              : { originatingTabId: source.sourceTabId }),
+            activeTabIds,
+            ...(adapterId === undefined ? {} : { adapterId }),
+          });
+          return {
+            ...correlation,
+            label: source?.label ?? "Captured job",
+            session,
+          };
         });
       }
       if (

@@ -208,7 +208,7 @@ export function createBackendClient(options: BackendClientOptions) {
         authenticated: true,
       }),
     getApplicationByTab: (tabId: number) =>
-      request<ApplicationSession>(`/v1/applications/by-tab/${tabId}`, {
+      request<ApplicationSession | null>(`/v1/applications/by-tab/${tabId}`, {
         authenticated: true,
       }),
     transitionApplication: (id: string, state: ApplicationState) =>

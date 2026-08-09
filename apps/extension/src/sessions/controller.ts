@@ -7,7 +7,7 @@ import type {
 export interface SessionApi {
   createApplication: (input: ApplicationCreate) => Promise<ApplicationSession>;
   getApplication: (id: string) => Promise<ApplicationSession>;
-  getApplicationByTab: (tabId: number) => Promise<ApplicationSession>;
+  getApplicationByTab: (tabId: number) => Promise<ApplicationSession | null>;
   transitionApplication: (
     id: string,
     state: ApplicationState,
@@ -37,12 +37,13 @@ export class SessionController {
     return session;
   }
 
-  async recover(tabId: number): Promise<ApplicationSession> {
+  async recover(tabId: number): Promise<ApplicationSession | undefined> {
     const applicationId = await this.tabs.get(tabId);
     const session =
       applicationId === null
         ? await this.api.getApplicationByTab(tabId)
         : await this.api.getApplication(applicationId);
+    if (session === null) return undefined;
     await this.tabs.set(tabId, session.id);
     return session;
   }

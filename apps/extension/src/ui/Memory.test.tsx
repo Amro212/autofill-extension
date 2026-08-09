@@ -32,4 +32,10 @@ describe("Memory", () => {
     expect(screen.getByText("Application-specific")).toBeInTheDocument();
     expect(screen.getByText("Because systems matter")).toBeInTheDocument();
   });
+
+  it("shows an error when the extension returns an invalid memory payload", async () => {
+    render(<Memory listMemories={async () => undefined as never} />);
+
+    expect(await screen.findByText("Could not load answer memory")).toBeInTheDocument();
+  });
 });

@@ -66,4 +66,20 @@ describe("SessionController", () => {
     expect(getApplicationByTab).toHaveBeenCalledWith(20);
     expect(set).toHaveBeenLastCalledWith(20, "application-1");
   });
+
+  it("returns undefined without persisting when no backend tab session exists", async () => {
+    const set = vi.fn();
+    const controller = new SessionController(
+      {
+        createApplication: vi.fn(),
+        getApplication: vi.fn(),
+        getApplicationByTab: vi.fn().mockResolvedValue(null),
+        transitionApplication: vi.fn(),
+      },
+      { get: vi.fn().mockResolvedValue(null), set },
+    );
+
+    await expect(controller.recover(41)).resolves.toBeUndefined();
+    expect(set).not.toHaveBeenCalled();
+  });
 });
