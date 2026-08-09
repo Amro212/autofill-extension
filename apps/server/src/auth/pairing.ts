@@ -9,6 +9,16 @@ export interface PairingServiceOptions {
   pairingSecret: string;
 }
 
+export interface PersistedPairingState {
+  installationId: string;
+  pairingSecretHash: string;
+  tokenHash?: string;
+}
+
+export interface PersistedPairingServiceOptions extends PersistedPairingState {
+  saveTokenHash?: (tokenHash: string) => void;
+}
+
 export interface PairingResult {
   installationId: string;
   token: string;
@@ -16,6 +26,10 @@ export interface PairingResult {
 
 function digest(value: string): Buffer {
   return createHash("sha256").update(value, "utf8").digest();
+}
+
+export function hashPairingCredential(value: string): string {
+  return digest(value).toString("hex");
 }
 
 function secureEqual(left: Buffer, right: Buffer): boolean {
@@ -26,10 +40,25 @@ export class PairingService {
   readonly installationId: string;
   readonly #pairingSecretHash: Buffer;
   #tokenHash: Buffer | undefined;
+  readonly #saveTokenHash: ((tokenHash: string) => void) | undefined;
 
-  constructor(options: PairingServiceOptions) {
+  constructor(options: PairingServiceOptions | PersistedPairingServiceOptions) {
     this.installationId = options.installationId;
-    this.#pairingSecretHash = digest(options.pairingSecret);
+    if ("pairingSecretHash" in options) {
+      this.#pairingSecretHash = Buffer.from(options.pairingSecretHash, "hex");
+      this.#tokenHash =
+        options.tokenHash === undefined
+          ? undefined
+          : Buffer.from(options.tokenHash, "hex");
+      this.#saveTokenHash = options.saveTokenHash;
+    } else {
+      this.#pairingSecretHash = digest(options.pairingSecret);
+      this.#saveTokenHash = undefined;
+    }
+  }
+
+  static fromPersisted(options: PersistedPairingServiceOptions): PairingService {
+    return new PairingService(options);
   }
 
   pair(pairingSecret: string): PairingResult {
@@ -39,6 +68,7 @@ export class PairingService {
 
     const token = randomBytes(32).toString("base64url");
     this.#tokenHash = digest(token);
+    this.#saveTokenHash?.(this.#tokenHash.toString("hex"));
     return { installationId: this.installationId, token };
   }
 

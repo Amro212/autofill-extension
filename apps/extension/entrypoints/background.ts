@@ -17,6 +17,8 @@ export default defineBackground(() => {
 
   browser.runtime.onMessage.addListener((message: unknown) => {
     if (message === "JOB_COPILOT_HEALTH") return client.health();
+    if (message === "JOB_COPILOT_GET_PROFILE") return client.getProfile();
+    if (message === "JOB_COPILOT_GET_SETTINGS") return client.getSettings();
     if (
       typeof message === "object" &&
       message !== null &&
@@ -26,6 +28,14 @@ export default defineBackground(() => {
       typeof message.pairingSecret === "string"
     ) {
       return client.pair(message.pairingSecret);
+    }
+    if (typeof message === "object" && message !== null && "type" in message) {
+      if (message.type === "JOB_COPILOT_UPDATE_PROFILE" && "update" in message) {
+        return client.updateProfile(message.update as never);
+      }
+      if (message.type === "JOB_COPILOT_UPDATE_SETTINGS" && "update" in message) {
+        return client.updateSettings(message.update as never);
+      }
     }
     return undefined;
   });

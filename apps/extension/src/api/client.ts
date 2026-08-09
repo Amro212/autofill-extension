@@ -8,7 +8,7 @@ export interface BackendClientOptions {
 interface RequestOptions {
   authenticated?: boolean;
   body?: unknown;
-  method?: "GET" | "POST";
+  method?: "GET" | "PATCH" | "POST";
 }
 
 export function createBackendClient(options: BackendClientOptions) {
@@ -51,5 +51,27 @@ export function createBackendClient(options: BackendClientOptions) {
       await options.saveToken?.(result.token);
       return result;
     },
+    getProfile: () =>
+      request<ApplicantProfile>("/v1/profile", { authenticated: true }),
+    updateProfile: (profile: ApplicantProfileUpdate) =>
+      request<ApplicantProfile>("/v1/profile", {
+        authenticated: true,
+        method: "PATCH",
+        body: profile,
+      }),
+    getSettings: () =>
+      request<AutomationSettings>("/v1/settings", { authenticated: true }),
+    updateSettings: (settings: AutomationSettingsUpdate) =>
+      request<AutomationSettings>("/v1/settings", {
+        authenticated: true,
+        method: "PATCH",
+        body: settings,
+      }),
   };
 }
+import type {
+  ApplicantProfile,
+  ApplicantProfileUpdate,
+  AutomationSettings,
+  AutomationSettingsUpdate,
+} from "@job-copilot/contracts";

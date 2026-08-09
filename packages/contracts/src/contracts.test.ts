@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   apiErrorSchema,
+  applicantProfileSchema,
   applicationSessionSchema,
+  automationSettingsSchema,
   normalizedFieldSchema,
 } from "./index.js";
 
@@ -72,6 +74,55 @@ describe("apiErrorSchema", () => {
         code: "BACKEND_UNPAIRED",
         message: "Pair extension before continuing",
       },
+    });
+  });
+});
+
+describe("applicantProfileSchema", () => {
+  it("creates an empty canonical profile without losing repeatable sections", () => {
+    const profile = applicantProfileSchema.parse({
+      id: "profile-1",
+      userId: "user-1",
+      identity: { firstName: "Ada", lastName: "Lovelace" },
+      contact: { email: "ada@example.test" },
+      createdAt: "2026-08-08T12:00:00.000Z",
+      updatedAt: "2026-08-08T12:00:00.000Z",
+    });
+
+    expect(profile.education).toEqual([]);
+    expect(profile.employment).toEqual([]);
+    expect(profile.projects).toEqual([]);
+    expect(profile.skills).toEqual([]);
+    expect(profile.certifications).toEqual([]);
+    expect(profile.customFacts).toEqual({});
+  });
+
+  it("rejects malformed contact data", () => {
+    expect(() =>
+      applicantProfileSchema.parse({
+        id: "profile-1",
+        userId: "user-1",
+        identity: {},
+        contact: { email: "not-an-email" },
+        createdAt: "2026-08-08T12:00:00.000Z",
+        updatedAt: "2026-08-08T12:00:00.000Z",
+      }),
+    ).toThrow();
+  });
+});
+
+describe("automationSettingsSchema", () => {
+  it("applies the product's locked safe defaults", () => {
+    const settings = automationSettingsSchema.parse({
+      userId: "user-1",
+      updatedAt: "2026-08-08T12:00:00.000Z",
+    });
+
+    expect(settings).toMatchObject({
+      aiAutofill: true,
+      autoContinue: true,
+      autoSubmit: false,
+      autopilot: false,
     });
   });
 });

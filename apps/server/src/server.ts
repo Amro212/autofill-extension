@@ -1,8 +1,13 @@
-import type { InstallationIdentity } from "./auth/installation.js";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { createInstallationIdentity } from "./auth/installation.js";
+
 import { PairingService } from "./auth/pairing.js";
 import { buildApp } from "./app.js";
+import { openDatabase } from "./db/client.js";
+import { migrateDatabase } from "./db/migrate.js";
+import { InstallationRepository } from "./repositories/installation.js";
+import { ProfileRepository } from "./repositories/profile.js";
+import { SettingsRepository } from "./repositories/settings.js";
 
 export interface ServerConfig {
   host: string;
@@ -29,16 +34,53 @@ export function resolveServerConfig(env: NodeJS.ProcessEnv): ServerConfig {
   return { host, port };
 }
 
-export async function startServer(
-  env: NodeJS.ProcessEnv = process.env,
-  identity: InstallationIdentity = createInstallationIdentity(),
-): Promise<void> {
-  const pairingService = new PairingService(identity);
-  const app = buildApp({ pairingService });
+export function resolveDataDirectory(
+  env: NodeJS.ProcessEnv,
+  currentDirectory = process.cwd(),
+): string {
+  return resolve(currentDirectory, env.JOB_COPILOT_DATA_DIR ?? "data");
+}
+
+export function createServerRuntime(env: NodeJS.ProcessEnv = process.env) {
+  const connection = openDatabase(
+    join(resolveDataDirectory(env), "job-copilot.sqlite"),
+  );
+  migrateDatabase(connection);
+  const installations = new InstallationRepository(connection.db);
+  const bootstrap = installations.getOrCreate();
+  const pairingService = PairingService.fromPersisted({
+    ...bootstrap,
+    saveTokenHash: (tokenHash) => installations.saveTokenHash(tokenHash),
+  });
+  const app = buildApp({
+    pairingService,
+    profileRepository: new ProfileRepository(connection.db),
+    settingsRepository: new SettingsRepository(connection.db),
+  });
+  app.addHook("onClose", () => connection.close());
+  return {
+    app,
+    pairingService,
+    installationId: bootstrap.installationId,
+    ...(bootstrap.pairingSecret === undefined
+      ? {}
+      : { pairingSecret: bootstrap.pairingSecret }),
+    close: () => app.close(),
+  };
+}
+
+export async function startServer(env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  const runtime = createServerRuntime(env);
+  const { app } = runtime;
   const address = await app.listen(resolveServerConfig(env));
 
-  app.log.info({ address, installationId: identity.installationId }, "Job Copilot ready");
-  process.stderr.write(`Pairing secret: ${identity.pairingSecret}\n`);
+  app.log.info(
+    { address, installationId: runtime.installationId },
+    "Job Copilot ready",
+  );
+  if (runtime.pairingSecret !== undefined) {
+    process.stderr.write(`Pairing secret: ${runtime.pairingSecret}\n`);
+  }
 }
 
 if (isMainModule(process.argv[1], import.meta.url)) {

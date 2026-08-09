@@ -2,10 +2,16 @@ import Fastify, { type FastifyInstance } from "fastify";
 
 import { registerHealthRoute } from "./api/health.js";
 import { registerPairingRoutes } from "./api/pair.js";
+import { registerProfileRoutes } from "./api/profile.js";
+import { registerSettingsRoutes } from "./api/settings.js";
 import type { PairingService } from "./auth/pairing.js";
+import type { ProfileRepository } from "./repositories/profile.js";
+import type { SettingsRepository } from "./repositories/settings.js";
 
 export interface BuildAppOptions {
   pairingService: PairingService;
+  profileRepository?: ProfileRepository;
+  settingsRepository?: SettingsRepository;
   logger?: boolean;
 }
 
@@ -43,5 +49,11 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
 
   registerHealthRoute(app);
   registerPairingRoutes(app, options.pairingService);
+  if (options.profileRepository !== undefined) {
+    registerProfileRoutes(app, options.pairingService, options.profileRepository);
+  }
+  if (options.settingsRepository !== undefined) {
+    registerSettingsRoutes(app, options.pairingService, options.settingsRepository);
+  }
   return app;
 }

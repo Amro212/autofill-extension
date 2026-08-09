@@ -8,7 +8,9 @@
   bottom: 16px;
   z-index: 2147483647;
   box-sizing: border-box;
-  width: 260px;
+  width: 300px;
+  max-height: min(620px, calc(100vh - 32px));
+  overflow: auto;
   padding: 14px 16px;
   border: 1px solid #d7dce3;
   border-radius: 12px;
@@ -18,12 +20,74 @@
   font: 14px/1.4 Arial, sans-serif;
 }
 
+.job-copilot-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
 .job-copilot-panel strong {
-  display: block;
-  margin-bottom: 6px;
   font-size: 15px;
+}
+
+.job-copilot-panel header span {
+  color: #516078;
+  font-size: 12px;
+  text-transform: capitalize;
 }
 
 .job-copilot-panel p {
   margin: 0;
+}
+
+.job-copilot-section {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #e7eaf0;
+  margin-top: 12px;
+}
+
+.job-copilot-section h2 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.job-copilot-section label:not(.job-copilot-toggle) {
+  display: grid;
+  gap: 3px;
+  color: #516078;
+  font-size: 12px;
+}
+
+.job-copilot-section input:not([type="checkbox"]) {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid #c9d0da;
+  border-radius: 6px;
+  background: #fff;
+  color: #172033;
+  font: inherit;
+}
+
+.job-copilot-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.job-copilot-section button {
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: #3157d5;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+}
+
+.job-copilot-section small {
+  color: #516078;
 }

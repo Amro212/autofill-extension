@@ -3,7 +3,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 
 import "../src/ui/content.css";
-import { ConnectionPanel } from "../src/ui/ConnectionPanel.js";
+import { Panel } from "../src/ui/Panel.js";
 
 export default defineContentScript({
   matches: ["http://*/*", "https://*/*"],
@@ -19,8 +19,25 @@ export default defineContentScript({
         container.append(app);
         const root = ReactDOM.createRoot(app);
         root.render(
-          <ConnectionPanel
+          <Panel
             checkHealth={() => browser.runtime.sendMessage("JOB_COPILOT_HEALTH")}
+            pairBackend={(pairingSecret) =>
+              browser.runtime.sendMessage({ type: "PAIR_BACKEND", pairingSecret })
+            }
+            getProfile={() => browser.runtime.sendMessage("JOB_COPILOT_GET_PROFILE")}
+            updateProfile={(update) =>
+              browser.runtime.sendMessage({
+                type: "JOB_COPILOT_UPDATE_PROFILE",
+                update,
+              })
+            }
+            getSettings={() => browser.runtime.sendMessage("JOB_COPILOT_GET_SETTINGS")}
+            updateSettings={(update) =>
+              browser.runtime.sendMessage({
+                type: "JOB_COPILOT_UPDATE_SETTINGS",
+                update,
+              })
+            }
           />,
         );
         return root;
