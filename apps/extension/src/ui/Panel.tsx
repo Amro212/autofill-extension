@@ -3,9 +3,12 @@ import type {
   ApplicantProfileUpdate,
   AutomationSettings,
   AutomationSettingsUpdate,
+  DocumentKind,
+  DocumentMetadata,
 } from "@job-copilot/contracts";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 
+import { Documents } from "./Documents.js";
 import { Profile } from "./Profile.js";
 import { Settings } from "./Settings.js";
 
@@ -18,6 +21,12 @@ export interface PanelProps {
   updateSettings: (
     update: AutomationSettingsUpdate,
   ) => Promise<AutomationSettings>;
+  listDocuments: () => Promise<DocumentMetadata[]>;
+  uploadDocument: (input: {
+    file: File;
+    kind: DocumentKind;
+  }) => Promise<DocumentMetadata>;
+  setDefaultDocument: (id: string) => Promise<DocumentMetadata>;
 }
 
 type PanelState =
@@ -120,6 +129,11 @@ export function Panel(props: PanelProps) {
               );
               return settings;
             }}
+          />
+          <Documents
+            listDocuments={props.listDocuments}
+            uploadDocument={props.uploadDocument}
+            setDefaultDocument={props.setDefaultDocument}
           />
         </>
       )}

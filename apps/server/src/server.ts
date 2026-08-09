@@ -5,6 +5,9 @@ import { PairingService } from "./auth/pairing.js";
 import { buildApp } from "./app.js";
 import { openDatabase } from "./db/client.js";
 import { migrateDatabase } from "./db/migrate.js";
+import { DocumentImportService } from "./documents/import.js";
+import { DocumentStorage } from "./documents/storage.js";
+import { DocumentRepository } from "./repositories/documents.js";
 import { InstallationRepository } from "./repositories/installation.js";
 import { ProfileRepository } from "./repositories/profile.js";
 import { SettingsRepository } from "./repositories/settings.js";
@@ -42,9 +45,8 @@ export function resolveDataDirectory(
 }
 
 export function createServerRuntime(env: NodeJS.ProcessEnv = process.env) {
-  const connection = openDatabase(
-    join(resolveDataDirectory(env), "job-copilot.sqlite"),
-  );
+  const dataDirectory = resolveDataDirectory(env);
+  const connection = openDatabase(join(dataDirectory, "job-copilot.sqlite"));
   migrateDatabase(connection);
   const installations = new InstallationRepository(connection.db);
   const bootstrap = installations.getOrCreate();
@@ -52,7 +54,12 @@ export function createServerRuntime(env: NodeJS.ProcessEnv = process.env) {
     ...bootstrap,
     saveTokenHash: (tokenHash) => installations.saveTokenHash(tokenHash),
   });
+  const documentService = new DocumentImportService(
+    new DocumentStorage(join(dataDirectory, "uploads")),
+    new DocumentRepository(connection.db),
+  );
   const app = buildApp({
+    documentService,
     pairingService,
     profileRepository: new ProfileRepository(connection.db),
     settingsRepository: new SettingsRepository(connection.db),

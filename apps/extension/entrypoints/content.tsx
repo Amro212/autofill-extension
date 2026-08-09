@@ -5,6 +5,15 @@ import ReactDOM from "react-dom/client";
 import "../src/ui/content.css";
 import { Panel } from "../src/ui/Panel.js";
 
+function toBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
+}
+
 export default defineContentScript({
   matches: ["http://*/*", "https://*/*"],
   cssInjectionMode: "ui",
@@ -36,6 +45,24 @@ export default defineContentScript({
               browser.runtime.sendMessage({
                 type: "JOB_COPILOT_UPDATE_SETTINGS",
                 update,
+              })
+            }
+            listDocuments={() =>
+              browser.runtime.sendMessage("JOB_COPILOT_GET_DOCUMENTS")
+            }
+            uploadDocument={async ({ file, kind }) =>
+              browser.runtime.sendMessage({
+                type: "JOB_COPILOT_UPLOAD_DOCUMENT",
+                base64: toBase64(await file.arrayBuffer()),
+                filename: file.name,
+                mediaType: file.type,
+                kind,
+              })
+            }
+            setDefaultDocument={(id) =>
+              browser.runtime.sendMessage({
+                type: "JOB_COPILOT_SET_DEFAULT_DOCUMENT",
+                id,
               })
             }
           />,

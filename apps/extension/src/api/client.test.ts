@@ -122,4 +122,30 @@ describe("backend client", () => {
       expect.objectContaining({ method: "PATCH" }),
     );
   });
+
+  it("uploads a document as bounded multipart data with metadata before bytes", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({ id: "document-1", originalFilename: "resume.pdf" }),
+        { status: 201, headers: { "content-type": "application/json" } },
+      ),
+    );
+    const client = createBackendClient({
+      fetcher,
+      getToken: async () => "paired-token",
+    });
+
+    await client.uploadDocument({
+      bytes: new Blob(["%PDF-test"], { type: "application/pdf" }),
+      filename: "resume.pdf",
+      kind: "resume",
+    });
+
+    const init = fetcher.mock.calls[0]![1]!;
+    expect(init.headers).toEqual({ authorization: "Bearer paired-token" });
+    expect(init.body).toBeInstanceOf(FormData);
+    const entries = [...(init.body as FormData).entries()];
+    expect(entries[0]).toEqual(["kind", "resume"]);
+    expect(entries[1]?.[0]).toBe("file");
+  });
 });

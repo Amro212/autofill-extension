@@ -45,6 +45,9 @@ describe("Panel", () => {
         updateProfile={updateProfile}
         getSettings={async () => settings}
         updateSettings={vi.fn()}
+        listDocuments={async () => []}
+        uploadDocument={vi.fn()}
+        setDefaultDocument={vi.fn()}
       />,
     );
 
@@ -73,6 +76,9 @@ describe("Panel", () => {
         updateProfile={vi.fn()}
         getSettings={async () => settings}
         updateSettings={updateSettings}
+        listDocuments={async () => []}
+        uploadDocument={vi.fn()}
+        setDefaultDocument={vi.fn()}
       />,
     );
 
@@ -105,6 +111,9 @@ describe("Panel", () => {
         updateProfile={vi.fn()}
         getSettings={async () => settings}
         updateSettings={vi.fn()}
+        listDocuments={async () => []}
+        uploadDocument={vi.fn()}
+        setDefaultDocument={vi.fn()}
       />,
     );
 

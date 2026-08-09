@@ -91,3 +91,52 @@
 .job-copilot-section small {
   color: #516078;
 }
+
+.job-copilot-documents {
+  display: grid;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.job-copilot-documents li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.job-copilot-documents li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-copilot-documents li button {
+  flex: none;
+  padding: 4px 6px;
+  background: #e8edff;
+  color: #2443a4;
+  font-size: 11px;
+}
+
+.job-copilot-document-upload {
+  display: grid;
+  gap: 8px;
+}
+
+.job-copilot-document-upload label {
+  display: grid;
+  gap: 3px;
+  color: #516078;
+  font-size: 12px;
+}
+
+.job-copilot-document-upload select {
+  padding: 6px;
+  border: 1px solid #c9d0da;
+  border-radius: 6px;
+  background: #fff;
+  color: #172033;
+}

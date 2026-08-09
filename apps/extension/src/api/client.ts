@@ -1,3 +1,12 @@
+import type {
+  ApplicantProfile,
+  ApplicantProfileUpdate,
+  AutomationSettings,
+  AutomationSettingsUpdate,
+  DocumentKind,
+  DocumentMetadata,
+} from "@job-copilot/contracts";
+
 export interface BackendClientOptions {
   baseUrl?: string;
   fetcher?: typeof fetch;
@@ -8,7 +17,7 @@ export interface BackendClientOptions {
 interface RequestOptions {
   authenticated?: boolean;
   body?: unknown;
-  method?: "GET" | "PATCH" | "POST";
+  method?: "GET" | "PATCH" | "POST" | "PUT";
 }
 
 export function createBackendClient(options: BackendClientOptions) {
@@ -67,11 +76,36 @@ export function createBackendClient(options: BackendClientOptions) {
         method: "PATCH",
         body: settings,
       }),
+    getDocuments: () =>
+      request<DocumentMetadata[]>("/v1/documents", { authenticated: true }),
+    setDefaultDocument: (id: string) =>
+      request<DocumentMetadata>(`/v1/documents/${id}/default`, {
+        authenticated: true,
+        method: "PUT",
+      }),
+    async uploadDocument(input: {
+      bytes: Blob;
+      filename: string;
+      kind: DocumentKind;
+    }) {
+      const token = await options.getToken();
+      const headers: Record<string, string> = {};
+      if (token !== null) headers.authorization = `Bearer ${token}`;
+      const body = new FormData();
+      body.set("kind", input.kind);
+      body.set("file", input.bytes, input.filename);
+      const response = await fetcher(`${baseUrl}/v1/documents`, {
+        method: "POST",
+        headers,
+        body,
+      });
+      const result = (await response.json()) as DocumentMetadata & {
+        error?: { message: string };
+      };
+      if (!response.ok) {
+        throw new Error(result.error?.message ?? "Document upload failed");
+      }
+      return result;
+    },
   };
 }
-import type {
-  ApplicantProfile,
-  ApplicantProfileUpdate,
-  AutomationSettings,
-  AutomationSettingsUpdate,
-} from "@job-copilot/contracts";

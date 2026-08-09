@@ -5,6 +5,7 @@ import {
   applicantProfileSchema,
   applicationSessionSchema,
   automationSettingsSchema,
+  documentMetadataSchema,
   normalizedFieldSchema,
 } from "./index.js";
 
@@ -124,5 +125,24 @@ describe("automationSettingsSchema", () => {
       autoSubmit: false,
       autopilot: false,
     });
+  });
+});
+
+describe("documentMetadataSchema", () => {
+  it("exposes document metadata without an internal filesystem key", () => {
+    const document = documentMetadataSchema.parse({
+      id: "document-1",
+      userId: "user-1",
+      kind: "resume",
+      source: "uploaded",
+      originalFilename: "resume.pdf",
+      mediaType: "application/pdf",
+      sizeBytes: 128,
+      sha256: "a".repeat(64),
+      isDefault: true,
+      createdAt: "2026-08-08T12:00:00.000Z",
+    });
+
+    expect(document).not.toHaveProperty("storageKey");
   });
 });

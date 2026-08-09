@@ -46,10 +46,33 @@ const INITIAL_SCHEMA = `
   PRAGMA user_version = 1;
 `;
 
+const DOCUMENT_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS documents (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    kind TEXT NOT NULL,
+    source TEXT NOT NULL,
+    original_filename TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    storage_key TEXT NOT NULL UNIQUE,
+    is_default INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS documents_user_kind_idx
+    ON documents(user_id, kind);
+  PRAGMA user_version = 2;
+`;
+
 export function migrateDatabase(connection: DatabaseConnection): void {
   const row = connection.sqlite.prepare("PRAGMA user_version").get() as {
     user_version: number;
   };
-  if (row.user_version < 1) connection.sqlite.exec(INITIAL_SCHEMA);
+  let version = row.user_version;
+  if (version < 1) {
+    connection.sqlite.exec(INITIAL_SCHEMA);
+    version = 1;
+  }
+  if (version < 2) connection.sqlite.exec(DOCUMENT_SCHEMA);
 }
-

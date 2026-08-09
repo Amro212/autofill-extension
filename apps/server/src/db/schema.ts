@@ -57,3 +57,18 @@ export const applications = sqliteTable("applications", {
   updatedAt: text("updated_at").notNull(),
 });
 
+export const documents = sqliteTable("documents", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  kind: text("kind").notNull(),
+  source: text("source").notNull(),
+  originalFilename: text("original_filename").notNull(),
+  mediaType: text("media_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  sha256: text("sha256").notNull(),
+  storageKey: text("storage_key").notNull().unique(),
+  isDefault: integer("is_default", { mode: "boolean" }).notNull(),
+  createdAt: text("created_at").notNull(),
+});
