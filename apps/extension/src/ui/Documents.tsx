@@ -120,35 +120,38 @@ export function Documents(props: DocumentsProps) {
         {documents.map((document) => (
           <li key={document.id}>
             <span title={document.originalFilename}>{document.originalFilename}</span>
-            {document.isDefault ? (
-              <small>Default</small>
-            ) : (
-              <button type="button" onClick={() => makeDefault(document.id)}>
-                Make default
-              </button>
-            )}
-            {document.kind === "resume" && props.parseResume !== undefined && (
-              <button type="button" onClick={() => void reviewSuggestions(document.id)}>
-                Review profile suggestions
-              </button>
-            )}
-            {document.kind === "resume" && document.source === "uploaded" && (
-              <>
-                {props.generateResume !== undefined && (
-                  <button type="button" onClick={() => void generate(document.id, props.generateResume)}>
-                    Generate tailored resume
-                  </button>
-                )}
-                {props.generateCoverLetter !== undefined && (
-                  <button
-                    type="button"
-                    onClick={() => void generate(document.id, props.generateCoverLetter)}
-                  >
-                    Generate cover letter
-                  </button>
-                )}
-              </>
-            )}
+            <div style={{ display: "flex", gap: "4px" }}>
+              {document.isDefault ? (
+                <span className="jc-badge jc-badge--green" style={{ alignSelf: "center", marginRight: 4 }}>Default</span>
+              ) : (
+                <button type="button" className="jc-btn-ghost" onClick={() => makeDefault(document.id)}>
+                  Make default
+                </button>
+              )}
+              {document.kind === "resume" && props.parseResume !== undefined && (
+                <button type="button" className="jc-btn-ghost" onClick={() => void reviewSuggestions(document.id)}>
+                  Parse Profile
+                </button>
+              )}
+              {document.kind === "resume" && document.source === "uploaded" && (
+                <>
+                  {props.generateResume !== undefined && (
+                    <button type="button" className="jc-btn-ghost" onClick={() => void generate(document.id, props.generateResume)}>
+                      Tailor
+                    </button>
+                  )}
+                  {props.generateCoverLetter !== undefined && (
+                    <button
+                      type="button"
+                      className="jc-btn-ghost"
+                      onClick={() => void generate(document.id, props.generateCoverLetter)}
+                    >
+                      Cover Letter
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
           </li>
         ))}
       </ul>
@@ -171,7 +174,7 @@ export function Documents(props: DocumentsProps) {
           />
         </label>
         <button type="submit" disabled={status === "saving" || file === undefined}>
-          Upload document
+          {status === "saving" ? "Uploading…" : "Upload document"}
         </button>
       </form>
       {suggestionsLoaded && (

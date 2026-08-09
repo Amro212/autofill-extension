@@ -55,6 +55,13 @@ export class FillController {
     const fields = this.options.registry
       .list()
       .filter((field) => field.pageKey === input.pageKey && field.kind !== "file");
+    
+    if (fields.length === 0) {
+      const operation = Promise.resolve({ filled: 0, failed: 0, results: [] });
+      this.#fills.set(cacheKey, operation);
+      return operation;
+    }
+
     const operation = this.options.client
       .answerPage({
         ...(input.applicationId === undefined

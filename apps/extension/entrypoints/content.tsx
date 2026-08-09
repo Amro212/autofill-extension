@@ -145,6 +145,15 @@ export default defineContentScript({
           type: "JOB_COPILOT_ANSWER_PAGE",
           request,
         });
+        if (
+          result === undefined ||
+          result === null ||
+          typeof result !== "object" ||
+          !("answers" in result) ||
+          !Array.isArray(result.answers)
+        ) {
+          throw new Error("AI response missing or malformed");
+        }
         recordDebug("ai-response", {
           task: "answer-page",
           answerCount: (result as PageAnswerResult).answers.length,

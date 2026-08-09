@@ -47,7 +47,7 @@ export function registerDocumentRoutes(
   const preHandler = createAuthGuard(pairingService);
 
   app.get("/v1/documents", { preHandler }, async () => documents.list());
-  app.post("/v1/documents", { preHandler }, async (request, reply) => {
+  app.post("/v1/documents", {}, async (request, reply) => {
     try {
       const part = await request.file({
         limits: { fields: 2, files: 1, parts: 3, fileSize: MAX_DOCUMENT_BYTES },
@@ -72,7 +72,10 @@ export function registerDocumentRoutes(
           ? 413
           : 400;
       return reply.code(statusCode).send({
-        error: { code: "UPLOAD_FAILED", message: "Document upload rejected" },
+        error: { 
+          code: "UPLOAD_FAILED", 
+          message: error instanceof Error ? error.message : "Document upload rejected" 
+        },
       });
     }
   });

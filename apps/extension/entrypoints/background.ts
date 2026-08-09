@@ -146,11 +146,17 @@ export default defineBackground(() => {
       }
       if (message.type === "JOB_COPILOT_ANSWER_PAGE" && "request" in message) {
         const request = pageAnswerRequestSchema.safeParse(message.request);
-        if (request.success) return client.answerPage(request.data);
+        if (!request.success) {
+          return Promise.reject(new Error("Invalid page answer request"));
+        }
+        return client.answerPage(request.data);
       }
       if (message.type === "JOB_COPILOT_REWRITE_FIELD" && "request" in message) {
         const request = rewriteRequestSchema.safeParse(message.request);
-        if (request.success) return client.rewriteField(request.data);
+        if (!request.success) {
+          return Promise.reject(new Error("Invalid rewrite request"));
+        }
+        return client.rewriteField(request.data);
       }
       if (
         message.type === "JOB_COPILOT_TRANSITION_APPLICATION" &&
