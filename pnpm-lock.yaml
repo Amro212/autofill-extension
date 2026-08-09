@@ -66,6 +66,9 @@ importers:
       '@fastify/multipart':
         specifier: ^10.1.0
         version: 10.1.0
+      '@job-copilot/ai-core':
+        specifier: workspace:*
+        version: link:../../packages/ai-core
       '@job-copilot/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -82,6 +85,12 @@ importers:
       tsx:
         specifier: ^4.23.11
         version: 4.23.11
+
+  packages/ai-core:
+    dependencies:
+      '@job-copilot/contracts':
+        specifier: workspace:*
+        version: link:../contracts
 
   packages/application-core:
     dependencies:

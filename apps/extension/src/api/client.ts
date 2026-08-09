@@ -9,6 +9,10 @@ import type {
   DocumentMetadata,
   JobCapture,
   JobRecord,
+  PageAnswerRequest,
+  PageAnswerResult,
+  RewriteRequest,
+  RewriteResult,
 } from "@job-copilot/contracts";
 
 export interface BackendClientOptions {
@@ -130,6 +134,18 @@ export function createBackendClient(options: BackendClientOptions) {
     getApplicationByTab: (tabId: number) =>
       request<ApplicationSession>(`/v1/applications/by-tab/${tabId}`, {
         authenticated: true,
+      }),
+    answerPage: (input: PageAnswerRequest) =>
+      request<PageAnswerResult>("/v1/ai/pages/answer", {
+        authenticated: true,
+        method: "POST",
+        body: input,
+      }),
+    rewriteField: (input: RewriteRequest) =>
+      request<RewriteResult>("/v1/ai/fields/rewrite", {
+        authenticated: true,
+        method: "POST",
+        body: input,
       }),
   };
 }

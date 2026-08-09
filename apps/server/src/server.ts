@@ -1,14 +1,20 @@
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { resolveAiProviderConfig } from "./ai/config.js";
+import { MockProvider } from "./ai/mock-provider.js";
+import { OpenRouterProvider } from "./ai/openrouter-provider.js";
+import { AiService } from "./ai/service.js";
 import { PairingService } from "./auth/pairing.js";
 import { buildApp } from "./app.js";
 import { openDatabase } from "./db/client.js";
 import { migrateDatabase } from "./db/migrate.js";
 import { DocumentImportService } from "./documents/import.js";
 import { DocumentStorage } from "./documents/storage.js";
+import { AnswerMemoryRepository } from "./memory/repository.js";
 import { DocumentRepository } from "./repositories/documents.js";
 import { ApplicationRepository } from "./repositories/applications.js";
+import { AnswerRecordRepository } from "./repositories/answers.js";
 import { JobRepository } from "./repositories/jobs.js";
 import { InstallationRepository } from "./repositories/installation.js";
 import { ProfileRepository } from "./repositories/profile.js";
@@ -61,15 +67,32 @@ export function createServerRuntime(env: NodeJS.ProcessEnv = process.env) {
     new DocumentRepository(connection.db),
   );
   const settingsRepository = new SettingsRepository(connection.db);
+  const profileRepository = new ProfileRepository(connection.db);
+  const jobRepository = new JobRepository(connection.db);
+  const applicationRepository = new ApplicationRepository(
+    connection.db,
+    settingsRepository,
+  );
+  const memoryRepository = new AnswerMemoryRepository(connection.db);
+  const aiConfig = resolveAiProviderConfig(env);
+  const aiProvider =
+    aiConfig.kind === "openrouter"
+      ? new OpenRouterProvider(aiConfig)
+      : new MockProvider();
   const app = buildApp({
-    applicationRepository: new ApplicationRepository(
-      connection.db,
-      settingsRepository,
-    ),
+    applicationRepository,
+    ai: {
+      service: new AiService(aiProvider),
+      profiles: profileRepository,
+      applications: applicationRepository,
+      jobs: jobRepository,
+      memories: memoryRepository,
+      answers: new AnswerRecordRepository(connection.db),
+    },
     documentService,
-    jobRepository: new JobRepository(connection.db),
+    jobRepository,
     pairingService,
-    profileRepository: new ProfileRepository(connection.db),
+    profileRepository,
     settingsRepository,
   });
   app.addHook("onClose", () => connection.close());

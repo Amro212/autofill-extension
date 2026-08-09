@@ -1,7 +1,14 @@
-import type { FieldKind, NormalizedField } from "@job-copilot/contracts";
+import type {
+  FieldKind,
+  NormalizedField,
+  PageAnswerResult,
+  RewriteResult,
+} from "@job-copilot/contracts";
 
 import type { DiscoveredField } from "../../../src/fields/discover.js";
 import { executeField, type FieldValue } from "../../../src/fields/execute.js";
+import { FillController } from "../../../src/fill/controller.js";
+import { NormalizedFieldRegistry } from "../../../src/fields/registry.js";
 
 const elements = {
   name: document.querySelector<HTMLInputElement>("#name")!,
@@ -63,6 +70,24 @@ const fields = {
     { label: "Toronto East" },
   ]),
 };
+fields.name.field.label = "First name";
+fields.name.field.semanticType = "identity.firstName";
+
+const registry = new NormalizedFieldRegistry();
+registry.reconcile(Object.values(fields));
+let suppliedPageAnswers: PageAnswerResult = { answers: [] };
+let suppliedRewrite: RewriteResult = { fieldId: "name", value: "" };
+const fillController = new FillController({
+  registry,
+  client: {
+    async answerPage() {
+      return suppliedPageAnswers;
+    },
+    async rewriteField() {
+      return suppliedRewrite;
+    },
+  },
+});
 
 let lastUndo: (() => Promise<unknown>) | undefined;
 window.executionHarness = {
@@ -74,6 +99,20 @@ window.executionHarness = {
   async undo() {
     return lastUndo?.();
   },
+  async applyPageAnswers(result: PageAnswerResult) {
+    suppliedPageAnswers = result;
+    return fillController.fillPage({ pageKey: "execution", applicationId: "e2e-app" });
+  },
+  async applyRewrite(result: RewriteResult, currentAnswer: string) {
+    suppliedRewrite = result;
+    return fillController.rewrite("name", {
+      applicationId: "e2e-app",
+      currentAnswer,
+    });
+  },
+  async undoFill() {
+    return fillController.undoLast();
+  },
 };
 
 declare global {
@@ -84,6 +123,9 @@ declare global {
         value: FieldValue,
       ): Promise<{ ok: boolean; actualValue: FieldValue; reason?: string }>;
       undo(): Promise<unknown>;
+      applyPageAnswers(result: PageAnswerResult): Promise<unknown>;
+      applyRewrite(result: RewriteResult, currentAnswer: string): Promise<unknown>;
+      undoFill(): Promise<unknown>;
     };
   }
 }

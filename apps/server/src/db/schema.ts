@@ -72,3 +72,40 @@ export const documents = sqliteTable("documents", {
   isDefault: integer("is_default", { mode: "boolean" }).notNull(),
   createdAt: text("created_at").notNull(),
 });
+
+export const answerMemories = sqliteTable("answer_memories", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  signature: text("signature").notNull(),
+  normalizedQuestion: text("normalized_question").notNull(),
+  valueJson: text("value_json").notNull(),
+  scope: text("scope").notNull(),
+  domain: text("domain"),
+  sourceApplicationId: text("source_application_id"),
+  pinned: integer("pinned", { mode: "boolean" }).notNull(),
+  usageCount: integer("usage_count").notNull(),
+  lastUsedAt: text("last_used_at"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const answerRecords = sqliteTable("answer_records", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  applicationId: text("application_id")
+    .notNull()
+    .references(() => applications.id),
+  fieldSignature: text("field_signature").notNull(),
+  question: text("question").notNull(),
+  valueJson: text("value_json").notNull(),
+  previousValueJson: text("previous_value_json"),
+  source: text("source").notNull(),
+  confidence: text("confidence"),
+  inferred: integer("inferred", { mode: "boolean" }),
+  rationaleCode: text("rationale_code"),
+  createdAt: text("created_at").notNull(),
+});

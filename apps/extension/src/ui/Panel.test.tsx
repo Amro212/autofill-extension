@@ -153,4 +153,31 @@ describe("Panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Engineer · Example Corp" }));
     await waitFor(() => expect(confirmJobContext).toHaveBeenCalledWith("job-1"));
   });
+
+  it("fills all detected fields in one page action and exposes undo", async () => {
+    const fillPage = vi.fn().mockResolvedValue({ filled: 2, failed: 0 });
+    const undoLast = vi.fn().mockResolvedValue({ ok: true });
+    render(
+      <Panel
+        checkHealth={async () => ({ status: "ok" })}
+        pairBackend={vi.fn()}
+        getProfile={async () => profile}
+        updateProfile={vi.fn()}
+        getSettings={async () => settings}
+        updateSettings={vi.fn()}
+        listDocuments={async () => []}
+        uploadDocument={vi.fn()}
+        setDefaultDocument={vi.fn()}
+        detectedFieldCount={2}
+        fillPage={fillPage}
+        undoLast={undoLast}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Fill 2 fields" }));
+    expect(await screen.findByText("Filled 2 fields")).toBeInTheDocument();
+    expect(fillPage).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Undo last fill" }));
+    await waitFor(() => expect(undoLast).toHaveBeenCalledTimes(1));
+  });
 });

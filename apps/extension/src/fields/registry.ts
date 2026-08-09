@@ -31,5 +31,10 @@ export class NormalizedFieldRegistry {
   elements(id: string): HTMLElement[] {
     return this.#elements.get(id) ?? [];
   }
-}
 
+  discovered(id: string): DiscoveredField | undefined {
+    const field = this.#fields.get(id);
+    const elements = this.#elements.get(id);
+    return field === undefined || elements === undefined ? undefined : { field, elements };
+  }
+}

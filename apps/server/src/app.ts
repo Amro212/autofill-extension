@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from "fastify";
 
+import { registerAiRoutes, type AiRouteDependencies } from "./api/ai.js";
 import { registerDocumentRoutes } from "./api/documents.js";
 import { registerApplicationRoutes } from "./api/applications.js";
 import { registerHealthRoute } from "./api/health.js";
@@ -21,6 +22,7 @@ export interface BuildAppOptions {
   jobRepository?: JobRepository;
   profileRepository?: ProfileRepository;
   settingsRepository?: SettingsRepository;
+  ai?: AiRouteDependencies;
   logger?: boolean;
 }
 
@@ -58,6 +60,9 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
 
   registerHealthRoute(app);
   registerPairingRoutes(app, options.pairingService);
+  if (options.ai !== undefined) {
+    registerAiRoutes(app, options.pairingService, options.ai);
+  }
   if (options.jobRepository !== undefined) {
     registerJobRoutes(app, options.pairingService, options.jobRepository);
   }

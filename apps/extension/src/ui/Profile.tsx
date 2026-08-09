@@ -2,7 +2,7 @@ import type {
   ApplicantProfile,
   ApplicantProfileUpdate,
 } from "@job-copilot/contracts";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 
 export interface ProfileProps {
   profile: ApplicantProfile;
@@ -16,8 +16,13 @@ export function Profile({ profile, onSave }: ProfileProps) {
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">(
     "idle",
   );
+  const mounted = useRef(false);
 
   useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
     setFirstName(profile.identity.firstName ?? "");
     setLastName(profile.identity.lastName ?? "");
     setEmail(profile.contact.email ?? "");
@@ -65,4 +70,3 @@ export function Profile({ profile, onSave }: ProfileProps) {
     </form>
   );
 }
-

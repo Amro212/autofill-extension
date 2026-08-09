@@ -187,4 +187,41 @@ describe("backend client", () => {
       expect.objectContaining({ method: "POST" }),
     );
   });
+
+  it("sends one authenticated AI request for the whole page", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ answers: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const client = createBackendClient({
+      fetcher,
+      getToken: async () => "paired-token",
+    });
+    const fields = [
+      {
+        id: "name",
+        adapterId: "generic",
+        pageKey: "apply",
+        kind: "text" as const,
+        label: "Name",
+        required: true,
+        currentValue: "",
+        evidence: { labelFor: true },
+        confidence: 0.9,
+      },
+    ];
+
+    await client.answerPage({ pageKey: "apply", fields });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://127.0.0.1:4317/v1/ai/pages/answer",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ authorization: "Bearer paired-token" }),
+        body: JSON.stringify({ pageKey: "apply", fields }),
+      }),
+    );
+  });
 });

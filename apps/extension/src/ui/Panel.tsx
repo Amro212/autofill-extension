@@ -34,6 +34,9 @@ export interface PanelProps {
         candidates: Array<{ jobId: string; label: string }>;
       };
   confirmJobContext?: (jobId: string) => Promise<unknown>;
+  detectedFieldCount?: number;
+  fillPage?: () => Promise<{ filled: number; failed: number }>;
+  undoLast?: () => Promise<unknown>;
 }
 
 type PanelState =
@@ -50,6 +53,12 @@ export function Panel(props: PanelProps) {
   const [state, setState] = useState<PanelState>({ status: "loading" });
   const [pairingSecret, setPairingSecret] = useState("");
   const [pairingError, setPairingError] = useState(false);
+  const [fillStatus, setFillStatus] = useState<
+    | { state: "idle" }
+    | { state: "generating" }
+    | { state: "done"; filled: number; failed: number }
+    | { state: "error" }
+  >({ state: "idle" });
 
   const loadPrivateData = useCallback(async () => {
     try {
@@ -136,6 +145,47 @@ export function Panel(props: PanelProps) {
       )}
       {state.status === "ready" && (
         <>
+          {props.fillPage !== undefined && (
+            <section className="job-copilot-section" aria-label="AI Autofill">
+              <h2>AI Autofill</h2>
+              <button
+                type="button"
+                disabled={
+                  fillStatus.state === "generating" ||
+                  (props.detectedFieldCount ?? 0) === 0
+                }
+                onClick={async () => {
+                  setFillStatus({ state: "generating" });
+                  try {
+                    const result = await props.fillPage!();
+                    setFillStatus({ state: "done", ...result });
+                  } catch {
+                    setFillStatus({ state: "error" });
+                  }
+                }}
+              >
+                {fillStatus.state === "generating"
+                  ? "Generating…"
+                  : `Fill ${props.detectedFieldCount ?? 0} fields`}
+              </button>
+              {fillStatus.state === "done" && (
+                <>
+                  <small role="status">
+                    Filled {fillStatus.filled} fields
+                    {fillStatus.failed === 0 ? "" : ` · ${fillStatus.failed} failed`}
+                  </small>
+                  {props.undoLast !== undefined && (
+                    <button type="button" onClick={() => void props.undoLast?.()}>
+                      Undo last fill
+                    </button>
+                  )}
+                </>
+              )}
+              {fillStatus.state === "error" && (
+                <small role="alert">AI fill failed</small>
+              )}
+            </section>
+          )}
           <Profile
             profile={state.profile}
             onSave={async (update) => {

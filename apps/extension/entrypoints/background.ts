@@ -5,6 +5,8 @@ import {
   documentKindSchema,
   documentMediaTypeSchema,
   jobCaptureSchema,
+  pageAnswerRequestSchema,
+  rewriteRequestSchema,
   type JobRecord,
 } from "@job-copilot/contracts";
 
@@ -115,6 +117,14 @@ export default defineBackground(() => {
       if (message.type === "JOB_COPILOT_UPDATE_SETTINGS" && "update" in message) {
         const update = automationSettingsUpdateSchema.safeParse(message.update);
         if (update.success) return client.updateSettings(update.data);
+      }
+      if (message.type === "JOB_COPILOT_ANSWER_PAGE" && "request" in message) {
+        const request = pageAnswerRequestSchema.safeParse(message.request);
+        if (request.success) return client.answerPage(request.data);
+      }
+      if (message.type === "JOB_COPILOT_REWRITE_FIELD" && "request" in message) {
+        const request = rewriteRequestSchema.safeParse(message.request);
+        if (request.success) return client.rewriteField(request.data);
       }
       if (
         message.type === "JOB_COPILOT_SET_DEFAULT_DOCUMENT" &&

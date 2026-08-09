@@ -2,12 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   apiErrorSchema,
+  answerRecordSchema,
   applicantProfileSchema,
   applicationSessionSchema,
   automationSettingsSchema,
   documentMetadataSchema,
   jobCaptureSchema,
   normalizedFieldSchema,
+  pageAnswerRequestSchema,
+  pageAnswerResultSchema,
+  rewriteRequestSchema,
 } from "./index.js";
 
 describe("normalizedFieldSchema", () => {
@@ -160,5 +164,82 @@ describe("jobCaptureSchema", () => {
 
   it("rejects an empty capture", () => {
     expect(() => jobCaptureSchema.parse({})).toThrow();
+  });
+});
+
+describe("AI page contracts", () => {
+  const field = {
+    id: "country",
+    adapterId: "generic",
+    pageKey: "apply-1",
+    kind: "native-select",
+    label: "Country",
+    required: true,
+    currentValue: "",
+    options: [{ label: "Canada", value: "CA" }],
+    evidence: { labelFor: true },
+    confidence: 0.9,
+  };
+
+  it("accepts one serializable page request and structured answer set", () => {
+    expect(
+      pageAnswerRequestSchema.parse({
+        applicationId: "application-1",
+        pageKey: "apply-1",
+        fields: [field],
+      }).fields,
+    ).toHaveLength(1);
+    expect(
+      pageAnswerResultSchema.parse({
+        answers: [
+          {
+            fieldId: "country",
+            value: "CA",
+            confidence: 0.98,
+            inferred: false,
+            rationaleCode: "profile-contact-country",
+          },
+        ],
+      }).answers[0]?.value,
+    ).toBe("CA");
+  });
+
+  it("rejects prose-shaped output and oversized values", () => {
+    expect(() => pageAnswerResultSchema.parse({ answer: "Canada" })).toThrow();
+    expect(() =>
+      pageAnswerResultSchema.parse({
+        answers: [{ fieldId: "country", value: "x".repeat(20_001) }],
+      }),
+    ).toThrow();
+  });
+
+  it("keeps rewrite scoped to one known field", () => {
+    expect(
+      rewriteRequestSchema.parse({
+        applicationId: "application-1",
+        field,
+        currentAnswer: "I enjoy building reliable systems.",
+        feedback: "Make it more specific",
+      }).field.id,
+    ).toBe("country");
+  });
+
+  it("retains answer provenance without chain-of-thought", () => {
+    const record = answerRecordSchema.parse({
+      id: "answer-1",
+      applicationId: "application-1",
+      fieldSignature: "country",
+      question: "Country",
+      value: "CA",
+      previousValue: "",
+      source: "ai",
+      confidence: 0.95,
+      inferred: false,
+      rationaleCode: "profile-contact-country",
+      createdAt: "2026-08-09T00:00:00.000Z",
+    });
+
+    expect(record.source).toBe("ai");
+    expect(record).not.toHaveProperty("reasoning");
   });
 });

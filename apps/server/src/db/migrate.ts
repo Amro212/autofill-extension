@@ -65,6 +65,47 @@ const DOCUMENT_SCHEMA = `
   PRAGMA user_version = 2;
 `;
 
+const ANSWER_MEMORY_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS answer_memories (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    signature TEXT NOT NULL,
+    normalized_question TEXT NOT NULL,
+    value_json TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    domain TEXT,
+    source_application_id TEXT,
+    pinned INTEGER NOT NULL,
+    usage_count INTEGER NOT NULL,
+    last_used_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS answer_memories_user_signature_idx
+    ON answer_memories(user_id, signature);
+  PRAGMA user_version = 3;
+`;
+
+const ANSWER_RECORD_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS answer_records (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    application_id TEXT NOT NULL REFERENCES applications(id),
+    field_signature TEXT NOT NULL,
+    question TEXT NOT NULL,
+    value_json TEXT NOT NULL,
+    previous_value_json TEXT,
+    source TEXT NOT NULL,
+    confidence TEXT,
+    inferred INTEGER,
+    rationale_code TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS answer_records_application_idx
+    ON answer_records(user_id, application_id, created_at);
+  PRAGMA user_version = 4;
+`;
+
 export function migrateDatabase(connection: DatabaseConnection): void {
   const row = connection.sqlite.prepare("PRAGMA user_version").get() as {
     user_version: number;
@@ -74,5 +115,13 @@ export function migrateDatabase(connection: DatabaseConnection): void {
     connection.sqlite.exec(INITIAL_SCHEMA);
     version = 1;
   }
-  if (version < 2) connection.sqlite.exec(DOCUMENT_SCHEMA);
+  if (version < 2) {
+    connection.sqlite.exec(DOCUMENT_SCHEMA);
+    version = 2;
+  }
+  if (version < 3) {
+    connection.sqlite.exec(ANSWER_MEMORY_SCHEMA);
+    version = 3;
+  }
+  if (version < 4) connection.sqlite.exec(ANSWER_RECORD_SCHEMA);
 }

@@ -3,8 +3,11 @@ import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 
 import "../src/ui/content.css";
+import { injectMainWorldBridge, type MainWorldBridge } from "../src/bridge/inject.js";
 import { discoverFields } from "../src/fields/discover.js";
+import { executeField } from "../src/fields/execute.js";
 import { NormalizedFieldRegistry } from "../src/fields/registry.js";
+import { FillController } from "../src/fill/controller.js";
 import { extractJob } from "../src/jobs/extract.js";
 import { observeMutations } from "../src/observer/mutations.js";
 import { observeRoutes } from "../src/observer/routes.js";
@@ -39,6 +42,21 @@ function readContextStatus(value: unknown): ContextStatus | undefined {
   return undefined;
 }
 
+function readApplicationId(value: unknown): string | undefined {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("session" in value) ||
+    typeof value.session !== "object" ||
+    value.session === null ||
+    !("id" in value.session) ||
+    typeof value.session.id !== "string"
+  ) {
+    return undefined;
+  }
+  return value.session.id;
+}
+
 function toBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let binary = "";
@@ -55,11 +73,33 @@ export default defineContentScript({
     let lastObservation = "";
     const fields = new NormalizedFieldRegistry();
     let currentContext: ContextStatus | undefined;
+    let currentApplicationId: string | undefined;
+    let detectedFieldCount = 0;
+    let mainWorldBridge: MainWorldBridge | undefined;
     const contextListeners = new Set<(status: ContextStatus | undefined) => void>();
+    const fieldCountListeners = new Set<(count: number) => void>();
     const publishContext = (status: ContextStatus | undefined) => {
       currentContext = status;
       for (const listener of contextListeners) listener(status);
     };
+    const pageKey = () => `${location.origin}${location.pathname}`;
+    const fillController = new FillController({
+      registry: fields,
+      client: {
+        answerPage: (request) =>
+          browser.runtime.sendMessage({ type: "JOB_COPILOT_ANSWER_PAGE", request }),
+        rewriteField: (request) =>
+          browser.runtime.sendMessage({ type: "JOB_COPILOT_REWRITE_FIELD", request }),
+      },
+      execute: async (discovered, value) => {
+        try {
+          mainWorldBridge ??= await injectMainWorldBridge();
+          return executeField(discovered, value, { bridge: mainWorldBridge });
+        } catch {
+          return executeField(discovered, value);
+        }
+      },
+    });
     const panelApi: Omit<
       PanelProps,
       "contextStatus" | "confirmJobContext"
@@ -100,25 +140,38 @@ export default defineContentScript({
           type: "JOB_COPILOT_SET_DEFAULT_DOCUMENT",
           id,
         }),
+      fillPage: () =>
+        fillController.fillPage({
+          pageKey: pageKey(),
+          ...(currentApplicationId === undefined
+            ? {}
+            : { applicationId: currentApplicationId }),
+        }),
+      undoLast: () => fillController.undoLast(),
     };
 
     function RuntimePanel() {
       const [contextStatus, setContextStatus] = useState(currentContext);
+      const [fieldCount, setFieldCount] = useState(detectedFieldCount);
       useEffect(() => {
         contextListeners.add(setContextStatus);
+        fieldCountListeners.add(setFieldCount);
         return () => {
           contextListeners.delete(setContextStatus);
+          fieldCountListeners.delete(setFieldCount);
         };
       }, []);
       return (
         <Panel
           {...panelApi}
           {...(contextStatus === undefined ? {} : { contextStatus })}
+          detectedFieldCount={fieldCount}
           confirmJobContext={async (jobId) => {
             const response = await browser.runtime.sendMessage({
               type: "JOB_COPILOT_CONFIRM_JOB_CONTEXT",
               jobId,
             });
+            currentApplicationId = readApplicationId(response);
             publishContext(readContextStatus(response));
           }}
         />
@@ -126,7 +179,12 @@ export default defineContentScript({
     }
 
     async function inspectPage() {
-      fields.reconcile(discoverFields(document, `${location.origin}${location.pathname}`));
+      fields.reconcile(discoverFields(document, pageKey()));
+      const nextFieldCount = fields.list().filter((field) => field.kind !== "file").length;
+      if (nextFieldCount !== detectedFieldCount) {
+        detectedFieldCount = nextFieldCount;
+        for (const listener of fieldCountListeners) listener(nextFieldCount);
+      }
       const classification = classifyPage(document);
       const signature = `${location.href}|${classification.type}`;
       if (signature === lastObservation) return;
@@ -144,6 +202,7 @@ export default defineContentScript({
             type: "JOB_COPILOT_APPLICATION_PAGE",
             url: location.href,
           });
+          currentApplicationId = readApplicationId(context);
           publishContext(readContextStatus(context));
         }
         lastObservation = signature;
@@ -174,6 +233,7 @@ export default defineContentScript({
     ctx.onInvalidated(() => {
       stopMutations();
       stopRoutes();
+      mainWorldBridge?.dispose();
     });
     await inspectPage();
   },
