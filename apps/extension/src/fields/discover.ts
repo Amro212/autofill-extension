@@ -10,6 +10,9 @@ import {
   type LabelSource,
 } from "@job-copilot/field-core";
 
+import { activeAtsAdapter } from "../adapters/registry.js";
+import type { AtsAdapter } from "../adapters/types.js";
+
 export interface DiscoveredField {
   field: NormalizedField;
   elements: HTMLElement[];
@@ -177,12 +180,16 @@ function sectionFor(element: HTMLElement): string | undefined {
   );
 }
 
-export function discoverFields(document: Document, pageKey: string): DiscoveredField[] {
+export function discoverFields(
+  document: Document,
+  pageKey: string,
+  adapter: AtsAdapter = activeAtsAdapter(document),
+): DiscoveredField[] {
   const candidates = [
     ...document.querySelectorAll<HTMLElement>(
       "input:not([type='hidden']), textarea, select, [contenteditable='true'], [role='combobox']",
     ),
-  ].filter(isDiscoverable);
+  ].filter((element) => isDiscoverable(element) && !adapter.shouldIgnore(element));
   const processed = new Set<HTMLElement>();
   const ordinals = new Map<string, number>();
   const discovered: DiscoveredField[] = [];
@@ -227,7 +234,7 @@ export function discoverFields(document: Document, pageKey: string): DiscoveredF
     discovered.push({
       field: {
         id,
-        adapterId: "generic",
+        adapterId: adapter.id,
         pageKey,
         kind,
         label: selectedLabel.label,

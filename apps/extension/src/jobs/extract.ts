@@ -87,6 +87,37 @@ function text(document: Document, selector: string): string | undefined {
   return normalize(document.querySelector(selector)?.textContent);
 }
 
+function atsJobEvidence(
+  document: Document,
+  listingUrl: URL,
+  ats: string | undefined,
+): { title?: string; jobId?: string; location?: string } {
+  if (ats === "workday") {
+    const jobId = listingUrl.pathname.match(/_([^/]+)(?:\/apply(?:\/|$)|$)/)?.[1];
+    const title = text(
+      document,
+      "[data-automation-id='jobTitleHeading'], [data-automation-id='jobPostingHeader'] h2",
+    );
+    const location = text(document, "[data-automation-id='locations']");
+    return {
+      ...(title === undefined ? {} : { title }),
+      ...(jobId === undefined ? {} : { jobId }),
+      ...(location === undefined ? {} : { location }),
+    };
+  }
+  if (ats === "greenhouse") {
+    const jobId = listingUrl.pathname.match(/\/jobs\/(\d+)/)?.[1];
+    const title = text(document, "main h1, h1");
+    const location = text(document, "[class*='location'], [data-testid='location']");
+    return {
+      ...(title === undefined ? {} : { title }),
+      ...(jobId === undefined ? {} : { jobId }),
+      ...(location === undefined ? {} : { location }),
+    };
+  }
+  return {};
+}
+
 export function extractJob(document: Document, listingUrl: URL): ExtractedJob {
   const structured = readStructuredJob(document);
   const applyAnchor = [...document.querySelectorAll<HTMLAnchorElement>("a[href]")].find(
@@ -95,14 +126,19 @@ export function extractJob(document: Document, listingUrl: URL): ExtractedJob {
   const applicationUrl = applyAnchor
     ? new URL(applyAnchor.getAttribute("href")!, listingUrl).href
     : undefined;
+  const ats = detectAts(applicationUrl ?? listingUrl.href);
+  const adapterEvidence = atsJobEvidence(document, listingUrl, ats);
   const descriptionRaw =
     normalize(structured?.description) ??
     text(document, "#job-description, [data-job-description], [itemprop='description']");
   const identifier = object(structured?.identifier);
   const hiringOrganization = object(structured?.hiringOrganization);
   return {
-    ...(normalize(structured?.title) ?? text(document, "h1")
-      ? { title: normalize(structured?.title) ?? text(document, "h1") }
+    ...(normalize(structured?.title) ?? adapterEvidence.title ?? text(document, "h1")
+      ? {
+          title:
+            normalize(structured?.title) ?? adapterEvidence.title ?? text(document, "h1"),
+        }
       : {}),
     ...(normalize(hiringOrganization?.name) ?? text(document, "[data-company], [itemprop='hiringOrganization']")
       ? {
@@ -111,21 +147,23 @@ export function extractJob(document: Document, listingUrl: URL): ExtractedJob {
             text(document, "[data-company], [itemprop='hiringOrganization']"),
         }
       : {}),
-    ...(locationFromStructured(structured?.jobLocation) ?? text(document, "[data-location], [itemprop='jobLocation']")
+    ...(locationFromStructured(structured?.jobLocation) ?? adapterEvidence.location ?? text(document, "[data-location], [itemprop='jobLocation']")
       ? {
           location:
             locationFromStructured(structured?.jobLocation) ??
+            adapterEvidence.location ??
             text(document, "[data-location], [itemprop='jobLocation']"),
         }
       : {}),
-    ...(normalize(identifier?.value) ? { jobId: normalize(identifier?.value) } : {}),
+    ...(normalize(identifier?.value) ?? adapterEvidence.jobId
+      ? { jobId: normalize(identifier?.value) ?? adapterEvidence.jobId }
+      : {}),
     ...(descriptionRaw === undefined ? {} : { descriptionRaw }),
     ...(descriptionRaw === undefined
       ? {}
       : { descriptionNormalized: textFromHtml(document, descriptionRaw) }),
     listingUrl: listingUrl.href,
     ...(applicationUrl === undefined ? {} : { applicationUrl }),
-    ...(detectAts(applicationUrl) === undefined ? {} : { ats: detectAts(applicationUrl) }),
+    ...(ats === undefined ? {} : { ats }),
   } as ExtractedJob;
 }
-

@@ -43,6 +43,7 @@ export const applicationCreateSchema = z.object({
   jobId: z.string().min(1).optional(),
   originatingTabId: z.number().int().nonnegative().optional(),
   activeTabIds: z.array(z.number().int().nonnegative()).default([]),
+  adapterId: z.string().min(1).optional(),
 });
 
 export const applicationTransitionSchema = z

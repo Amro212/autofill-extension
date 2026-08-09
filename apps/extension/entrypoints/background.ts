@@ -217,6 +217,10 @@ export default defineBackground(() => {
             ? { jobId: message.jobId }
             : {}),
         };
+        const adapterId =
+          "adapterId" in message && typeof message.adapterId === "string"
+            ? message.adapterId
+            : undefined;
         return readPendingJobs().then(async (pending) => {
           const correlation = correlateJobContext(pending, target);
           if (correlation.status === "ambiguous") {
@@ -249,6 +253,7 @@ export default defineBackground(() => {
                 ? {}
                 : { originatingTabId: source.sourceTabId }),
               activeTabIds,
+              ...(adapterId === undefined ? {} : { adapterId }),
             });
             return {
               ...correlation,
@@ -272,6 +277,9 @@ export default defineBackground(() => {
             jobId: source.jobId,
             originatingTabId: source.sourceTabId,
             activeTabIds: [...new Set([source.sourceTabId, tabId])],
+            ...("adapterId" in message && typeof message.adapterId === "string"
+              ? { adapterId: message.adapterId }
+              : {}),
           });
           return {
             status: "matched" as const,

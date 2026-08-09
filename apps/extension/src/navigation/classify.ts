@@ -23,13 +23,18 @@ function isEnabled(element: HTMLElement): boolean {
   );
 }
 
-export function classifyNavigation(document: Document): NavigationTarget[] {
+export function classifyNavigation(
+  document: Document,
+  adapter: AtsAdapter = activeAtsAdapter(document),
+): NavigationTarget[] {
   const controls = [
     ...document.querySelectorAll<HTMLElement>(
       "button, input[type='button'], input[type='submit'], [role='button'], a[href]",
     ),
   ].filter(isEnabled);
   return controls.flatMap<NavigationTarget>((element) => {
+    const adapterKind = adapter.navigationKind(element);
+    if (adapterKind !== undefined) return [{ kind: adapterKind, element }];
     const text = label(element);
     if (/^(?:submit application|submit)$/.test(text)) {
       return [{ kind: "submit" as const, element }];
@@ -43,3 +48,5 @@ export function classifyNavigation(document: Document): NavigationTarget[] {
     return [];
   });
 }
+import { activeAtsAdapter } from "../adapters/registry.js";
+import type { AtsAdapter } from "../adapters/types.js";

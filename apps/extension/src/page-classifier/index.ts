@@ -1,4 +1,5 @@
 import { classifyBoundary } from "../boundaries/classify.js";
+import { activeAtsAdapter } from "../adapters/registry.js";
 
 export type PageType =
   | "unrelated"
@@ -25,6 +26,7 @@ function result(type: PageType, confidence: number, ...evidence: string[]) {
 
 export function classifyPage(document: Document): PageClassification {
   const text = pageText(document);
+  const adapter = activeAtsAdapter(document);
   const boundary = classifyBoundary(document);
   if (boundary.type === "captcha") {
     return result("captcha", 0.99, "captcha marker");
@@ -35,15 +37,11 @@ export function classifyPage(document: Document): PageClassification {
   if (/application (?:was )?submitted|thank you for applying|application received/.test(text)) {
     return result("confirmation", 0.98, "submission confirmation language");
   }
-  if (
-    /review (?:your|my) application/.test(text) ||
-    [...document.querySelectorAll("button, input[type='submit']")].some((element) =>
-      /submit application/i.test(
-        element instanceof HTMLInputElement ? element.value : element.textContent ?? "",
-      ),
-    )
-  ) {
+  if (/review (?:your|my) application/.test(text) || adapter.isFinalPage(document)) {
     return result("review", 0.94, "review or final-submit marker");
+  }
+  if (adapter.pageKind(document) === "application") {
+    return result("application", 0.94, `${adapter.id} application structure`);
   }
   const form = document.querySelector("form");
   if (
@@ -61,6 +59,9 @@ export function classifyPage(document: Document): PageClassification {
   );
   if (applyLink && (description || /responsibilities|qualifications|job description/.test(text))) {
     return result("job-listing", 0.9, "job description and apply link");
+  }
+  if (adapter.pageKind(document) === "listing") {
+    return result("job-listing", 0.92, `${adapter.id} listing structure`);
   }
   return result("unrelated", 0.8, "no job or application evidence");
 }

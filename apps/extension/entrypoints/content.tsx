@@ -14,6 +14,7 @@ import "../src/ui/content.css";
 import { PageAutomationController } from "../src/automation/controller.js";
 import { injectMainWorldBridge, type MainWorldBridge } from "../src/bridge/inject.js";
 import { discoverFields } from "../src/fields/discover.js";
+import { activeAtsAdapter } from "../src/adapters/registry.js";
 import { executeField } from "../src/fields/execute.js";
 import { NormalizedFieldRegistry } from "../src/fields/registry.js";
 import { FillController, type FillPageResult } from "../src/fill/controller.js";
@@ -326,6 +327,7 @@ export default defineContentScript({
             const response = await browser.runtime.sendMessage({
               type: "JOB_COPILOT_CONFIRM_JOB_CONTEXT",
               jobId,
+              adapterId: activeAtsAdapter(document).id,
             });
             currentSession = readApplicationSession(response);
             publishContext(readContextStatus(response));
@@ -357,6 +359,7 @@ export default defineContentScript({
           const context = await browser.runtime.sendMessage({
             type: "JOB_COPILOT_APPLICATION_PAGE",
             url: location.href,
+            adapterId: activeAtsAdapter(document).id,
           });
           currentSession = readApplicationSession(context);
           publishContext(readContextStatus(context));
