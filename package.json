@@ -1,0 +1,22 @@
+{
+  "name": "job-copilot",
+  "version": "0.1.0",
+  "description": "Job Copilot — Tampermonkey userscript for AI job applications",
+  "main": "dist/job-copilot.user.js",
+  "type": "module",
+  "scripts": {
+    "build": "node build.js",
+    "dev": "node build.js --watch"
+  },
+  "keywords": [
+    "tampermonkey",
+    "userscript",
+    "job-copilot",
+    "autofill"
+  ],
+  "author": "Job Copilot Team",
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

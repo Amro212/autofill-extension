@@ -1,0 +1,13 @@
+{
+  "kit": "Job Copilot Tampermonkey 6-Phase Implementation Kit",
+  "architecture": "Modular source bundled to a single Tampermonkey userscript; no backend",
+  "manual_acceptance_required_between_phases": true,
+  "phases": [
+    "Foundation",
+    "Generic AI Autofill",
+    "Application Engine",
+    "ATS Hardening",
+    "Documents + AI Tailoring",
+    "Product Polish + Outreach Hooks"
+  ]
+}
