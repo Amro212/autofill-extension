@@ -1,4 +1,4 @@
-import { getApiKey, getSettings } from './storage.js';
+import { getApiKey, getSettings, getProfile } from './storage.js';
 import { logger } from './debug.js';
 
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
@@ -13,7 +13,6 @@ function sendGMRequest(options) {
         ontimeout: () => reject(new Error('Request timed out')),
       });
     } else {
-      // Fallback for development environments
       fetch(options.url, {
         method: options.method,
         headers: options.headers,
@@ -30,6 +29,15 @@ function sendGMRequest(options) {
         .catch(reject);
     }
   });
+}
+
+function cleanJsonFence(text) {
+  if (!text) return '';
+  let cleaned = text.trim();
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
+  }
+  return cleaned;
 }
 
 export async function testConnection() {
@@ -82,9 +90,7 @@ export async function testConnection() {
       try {
         const data = JSON.parse(response.responseText);
         reply = data.choices?.[0]?.message?.content?.trim() || 'OK';
-      } catch {
-        // parse error on body is non-fatal if 200
-      }
+      } catch {}
 
       logger.info(`OpenRouter connection test succeeded in ${latencyMs}ms. Response: "${reply}"`);
       return {
@@ -96,7 +102,6 @@ export async function testConnection() {
       };
     }
 
-    // Handle standard HTTP error codes
     let errorDetail = `HTTP ${statusCode}`;
     try {
       const errorJson = JSON.parse(response.responseText);
@@ -137,4 +142,212 @@ export async function testConnection() {
       status: 'NETWORK_ERROR',
     };
   }
+}
+
+/**
+ * Executes a single primary AI request to fill all detected form fields on the page
+ */
+export async function generateAutofillAnswers(normalizedFields) {
+  const apiKey = getApiKey();
+  const settings = getSettings();
+  const profile = getProfile();
+  const model = settings.model || 'google/gemini-2.0-flash';
+
+  if (!apiKey) {
+    throw new Error('No OpenRouter API key configured. Please set your key in Settings.');
+  }
+
+  const systemPrompt = `You are Job Copilot, an expert AI assistant filling an online job application for a candidate.
+
+CRITICAL OPERATING RULES:
+1. Ground all candidate claims strictly in the provided applicant profile, resume highlights, and applicant notes.
+2. NEVER fabricate or invent unlisted jobs, employers, dates, metrics, degrees, tools, or certifications (Rule 11).
+3. For structured questions (radio, select, checkbox, short text) where candidate preferences or standard defaults apply:
+   - Work authorization in the US: standard is Yes (authorized), unless applicant notes state otherwise. Set "inferred": true (Rule 12).
+   - Visa sponsorship: standard is No (will not require), unless applicant notes state otherwise. Set "inferred": true.
+   - Years of experience dropdowns: infer the candidate's level (e.g. Senior, Mid, 5+ years) from their resume context and select the best matching option. Set "inferred": true.
+   - Demographic surveys / EEOD / Disability / Veteran status: select a standard valid option (e.g. "I do not wish to answer", "No", or decline to state) from the provided options list. Set "inferred": true.
+   - Consent / Privacy / Background check agreement checkboxes: set value to true.
+   - General, custom, or simulation text fields: provide a concise, relevant response based on the candidate's software background or profile.
+4. For narrative / open-ended questions (e.g. "Why do you want to work here?", "Describe your experience with X"):
+   - Write a polished, professional, compelling first-person answer using real facts and achievements from the resume context.
+   - Respect character limits if specified.
+5. For "select", "radio", or "checkbox" fields:
+   - Your "value" MUST be chosen strictly from the provided "options" list (matching either the option value or option label). Never leave a select on a placeholder like "-- Please Select --" or "Select...".
+6. Return an answer object for EVERY field provided in "fieldsToFill".
+7. Respond ONLY with a valid JSON object in this exact schema, without markdown code blocks:
+{
+  "answers": [
+    {
+      "fieldId": "string (must match fieldId from input)",
+      "value": "string or boolean",
+      "inferred": boolean
+    }
+  ]
+}`;
+
+  const userContent = JSON.stringify({
+    applicantProfile: {
+      fullName: profile.fullName,
+      email: profile.email,
+      phone: profile.phone,
+      location: profile.location,
+      linkedin: profile.linkedin,
+      github: profile.github,
+      portfolio: profile.portfolio,
+    },
+    resumeContext: profile.resumeContext,
+    applicantNotes: profile.applicantNotes,
+    pageContext: {
+      url: window.location.href,
+      host: window.location.hostname,
+    },
+    fieldsToFill: normalizedFields,
+  }, null, 2);
+
+  logger.info(`Sending unified autofill AI request for ${normalizedFields.length} fields using ${model}`);
+  const startTime = Date.now();
+
+  const payload = JSON.stringify({
+    model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userContent },
+    ],
+    response_format: { type: 'json_object' },
+    temperature: 0.2,
+  });
+
+  const response = await sendGMRequest({
+    method: 'POST',
+    url: OPENROUTER_ENDPOINT,
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://github.com/Amro212/autofill-extension',
+      'X-Title': 'Job Copilot Tampermonkey',
+    },
+    data: payload,
+    timeout: 35000,
+  });
+
+  const latencyMs = Date.now() - startTime;
+
+  if (response.status !== 200) {
+    let errorDetail = `HTTP ${response.status}`;
+    try {
+      const errJson = JSON.parse(response.responseText);
+      if (errJson.error?.message) errorDetail = errJson.error.message;
+    } catch {}
+    throw new Error(`OpenRouter Error (${response.status}): ${errorDetail}`);
+  }
+
+  let rawContent = '';
+  try {
+    const data = JSON.parse(response.responseText);
+    rawContent = data.choices?.[0]?.message?.content || '';
+  } catch (err) {
+    throw new Error(`Failed to parse OpenRouter response: ${err.message}`);
+  }
+
+  const cleaned = cleanJsonFence(rawContent);
+  let parsed;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (err) {
+    logger.error('Failed to parse AI answers JSON:', cleaned);
+    throw new Error(`AI returned invalid JSON: ${err.message}`);
+  }
+
+  if (!parsed || !Array.isArray(parsed.answers)) {
+    throw new Error('AI response missing "answers" array');
+  }
+
+  const validFieldIds = new Set(normalizedFields.map((f) => f.fieldId));
+  const validatedAnswers = parsed.answers.filter((ans) => {
+    if (!validFieldIds.has(ans.fieldId)) {
+      logger.warn(`AI returned answer for unrecognized field ID: "${ans.fieldId}" (omitted)`);
+      return false;
+    }
+    return true;
+  });
+
+  logger.info(`Received ${validatedAnswers.length} valid answers from AI in ${latencyMs}ms`);
+  return {
+    answers: validatedAnswers,
+    latencyMs,
+    model,
+  };
+}
+
+/**
+ * Rewrites an individual narrative field with optional user feedback instructions
+ */
+export async function rewriteNarrativeField({ fieldLabel, currentValue, feedback, constraints }) {
+  const apiKey = getApiKey();
+  const settings = getSettings();
+  const profile = getProfile();
+  const model = settings.model || 'google/gemini-2.0-flash';
+
+  if (!apiKey) {
+    throw new Error('No OpenRouter API key configured.');
+  }
+
+  const systemPrompt = `You are Job Copilot. You are rewriting a single narrative response in a job application for the candidate.
+Rules:
+1. Stay strictly faithful to the candidate's actual experience from their resume highlights.
+2. Incorporate the candidate's specific feedback and revision instructions.
+3. Write in concise, compelling first-person.
+4. Output ONLY the rewritten answer text with no surrounding quotes or commentary.`;
+
+  const userPrompt = `Question Label: ${fieldLabel}
+Current Answer:
+${currentValue}
+
+Candidate Resume Highlights:
+${profile.resumeContext}
+
+Applicant Notes / Rules:
+${profile.applicantNotes}
+
+User Revision Instructions:
+${feedback || 'Improve clarity, impact, and tailoring for this job.'}
+${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters` : ''}`;
+
+  logger.info(`Sending narrative rewrite request for "${fieldLabel}" using ${model}`);
+  const startTime = Date.now();
+
+  const payload = JSON.stringify({
+    model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
+    temperature: 0.4,
+  });
+
+  const response = await sendGMRequest({
+    method: 'POST',
+    url: OPENROUTER_ENDPOINT,
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://github.com/Amro212/autofill-extension',
+      'X-Title': 'Job Copilot Tampermonkey',
+    },
+    data: payload,
+    timeout: 25000,
+  });
+
+  const latencyMs = Date.now() - startTime;
+
+  if (response.status !== 200) {
+    throw new Error(`Rewrite request failed (HTTP ${response.status})`);
+  }
+
+  const data = JSON.parse(response.responseText);
+  const rewrittenText = data.choices?.[0]?.message?.content?.trim() || '';
+
+  logger.info(`Narrative rewritten in ${latencyMs}ms (${rewrittenText.length} chars)`);
+  return rewrittenText;
 }

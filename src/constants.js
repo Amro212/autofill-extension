@@ -1,4 +1,4 @@
-export const APP_VERSION = '0.1.0';
+export const APP_VERSION = '0.2.0';
 export const APP_NAME = 'Job Copilot';
 
 export const STORAGE_KEYS = {
@@ -12,6 +12,7 @@ export const STORAGE_KEYS = {
 export const DEFAULT_SETTINGS = {
   model: 'google/gemini-2.0-flash',
   autofillEnabled: true,
+  overwriteExisting: false,
   autoContinue: true,
   autoSubmit: false,
   autopilot: false,
@@ -40,4 +41,29 @@ export const POPULAR_MODELS = [
 
 export const UI_IDS = {
   CONTAINER: 'job-copilot-root',
+  INLINE_REWRITE: 'job-copilot-inline-rewrite',
+};
+
+export const FIELD_TYPES = {
+  TEXT: 'text',
+  TEXTAREA: 'textarea',
+  EMAIL: 'email',
+  TEL: 'tel',
+  URL: 'url',
+  NUMBER: 'number',
+  SELECT: 'select',
+  RADIO: 'radio',
+  CHECKBOX: 'checkbox',
+  COMBOBOX: 'combobox',
+  CONTENTEDITABLE: 'contenteditable',
+};
+
+export const FILL_STATUS = {
+  IDLE: 'idle',
+  DETECTED: 'detected',
+  FILLING: 'filling',
+  VERIFIED: 'verified',
+  FAILED: 'failed',
+  SKIPPED: 'skipped',
+  INFERRED: 'inferred',
 };

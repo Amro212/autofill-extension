@@ -1,4 +1,4 @@
-import { APP_VERSION, APP_NAME, POPULAR_MODELS, UI_IDS } from './constants.js';
+import { APP_VERSION, APP_NAME, POPULAR_MODELS, UI_IDS, FILL_STATUS } from './constants.js';
 import {
   getSettings,
   saveSettings,
@@ -9,13 +9,38 @@ import {
   getSanitizedState,
 } from './storage.js';
 import { logger } from './debug.js';
-import { testConnection } from './ai.js';
+import { testConnection, generateAutofillAnswers, rewriteNarrativeField } from './ai.js';
+import { scanFormFields } from './fields/scanner.js';
+import { extractOptionLabel } from './fields/labels.js';
+import { normalizeFieldsForAI } from './fields/normalize.js';
+import { fillField } from './fields/fillers.js';
+import { verifyField } from './fields/verify.js';
+import {
+  scrollToField,
+  highlightActiveField,
+  highlightVerifiedField,
+  highlightFailedField,
+  clearHighlights,
+  initInlineRewriteBadge,
+} from './fields/highlight.js';
+import { startFormObserver } from './observer.js';
 
 let shadowRootRef = null;
 let currentTab = 'home';
 let panelVisible = false;
 let lastAiTestResult = null;
 let isAiTesting = false;
+
+// Autofill execution state
+let isAutofilling = false;
+let autofillProgress = { current: 0, total: 0, statusText: '' };
+let detectedFieldsCache = [];
+let fieldResultsCache = new Map(); // fieldId -> { status, value, error, inferred }
+
+// Rewrite modal state
+let activeRewriteField = null;
+let isRewriting = false;
+let rewriteFeedbackInput = '';
 
 const STYLES = `
 :host {
@@ -68,10 +93,6 @@ const STYLES = `
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
 }
 
-.jc-pill-btn:active {
-  transform: translateY(0);
-}
-
 .jc-status-dot {
   width: 8px;
   height: 8px;
@@ -92,10 +113,10 @@ const STYLES = `
 
 .jc-panel {
   pointer-events: auto;
-  width: 440px;
+  width: 450px;
   max-width: calc(100vw - 40px);
-  height: 580px;
-  max-height: calc(100vh - 100px);
+  height: 600px;
+  max-height: calc(100vh - 80px);
   background: #0f172a;
   background-image: radial-gradient(at 0% 0%, rgba(30, 41, 59, 0.7) 0px, transparent 50%),
                     radial-gradient(at 100% 100%, rgba(15, 23, 42, 0.9) 0px, transparent 50%);
@@ -316,6 +337,18 @@ const STYLES = `
   cursor: not-allowed;
 }
 
+.jc-btn-large {
+  padding: 12px 18px;
+  font-size: 13px;
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+}
+
+.jc-btn-large:hover {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.5);
+}
+
 .jc-btn-secondary {
   background: #1e293b;
   color: #cbd5e1;
@@ -327,13 +360,10 @@ const STYLES = `
   color: #f8fafc;
 }
 
-.jc-btn-danger {
-  background: #991b1b;
-  color: #fecaca;
-}
-
-.jc-btn-danger:hover {
-  background: #b91c1c;
+.jc-btn-small {
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 6px;
 }
 
 .jc-toggle-row {
@@ -418,6 +448,12 @@ input:checked + .jc-slider:before {
   border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
+.jc-badge-blue {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
 .jc-alert {
   padding: 10px 12px;
   border-radius: 8px;
@@ -471,7 +507,123 @@ input:checked + .jc-slider:before {
   color: #34d399;
   display: none;
 }
+
+.jc-progress-bar-container {
+  width: 100%;
+  height: 6px;
+  background: #1e293b;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.jc-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #38bdf8, #2563eb);
+  transition: width 0.2s ease;
+}
+
+.jc-field-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: #090d16;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+}
+
+.jc-field-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.jc-field-name {
+  font-weight: 600;
+  font-size: 12px;
+  color: #f1f5f9;
+}
+
+.jc-field-val-preview {
+  font-size: 11px;
+  color: #94a3b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jc-modal-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.jc-modal {
+  width: 100%;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 `;
+
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+let ttPolicy = null;
+
+function getTrustedHTML(htmlString) {
+  if (typeof window !== 'undefined' && window.trustedTypes && typeof window.trustedTypes.createPolicy === 'function') {
+    if (!ttPolicy) {
+      try {
+        ttPolicy = window.trustedTypes.createPolicy('job-copilot-ui', {
+          createHTML: (s) => s,
+        });
+      } catch {
+        ttPolicy = window.trustedTypes.defaultPolicy || { createHTML: (s) => s };
+      }
+    }
+    try {
+      return ttPolicy.createHTML ? ttPolicy.createHTML(htmlString) : htmlString;
+    } catch {
+      return htmlString;
+    }
+  }
+  return htmlString;
+}
+
+function setSafeHTML(element, htmlString) {
+  try {
+    element.innerHTML = getTrustedHTML(htmlString);
+  } catch (err) {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(htmlString, 'text/html');
+      element.replaceChildren(...doc.body.childNodes);
+    } catch (parseErr) {
+      console.warn('[JobCopilot:UI] Fallback HTML assignment failed:', parseErr);
+    }
+  }
+}
 
 function getStatusInfo() {
   const apiKey = getApiKey();
@@ -499,12 +651,185 @@ function getStatusInfo() {
   };
 }
 
+function refreshDetectedFields() {
+  try {
+    detectedFieldsCache = scanFormFields(document);
+  } catch (err) {
+    logger.error('Error scanning fields:', err);
+  }
+}
+
+async function executeAutofillFlow() {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    alert('Please configure your OpenRouter API Key in Settings first.');
+    currentTab = 'settings';
+    updatePanelDOM();
+    return;
+  }
+
+  isAutofilling = true;
+  autofillProgress = { current: 0, total: 0, statusText: 'Scanning page fields...' };
+  updatePanelDOM();
+
+  try {
+    refreshDetectedFields();
+    const settings = getSettings();
+    const overwrite = Boolean(settings.overwriteExisting);
+
+    const targetFields = detectedFieldsCache.filter((f) => {
+      if (overwrite) return true;
+      const val = f.currentValue;
+      return !val || val === 'false' || val === '0' || String(val).trim().length === 0;
+    });
+
+    if (targetFields.length === 0) {
+      autofillProgress.statusText = detectedFieldsCache.length === 0
+        ? 'No form fields detected on this page.'
+        : 'All fields are already filled. Enable "Overwrite Existing Values" in Settings to overwrite.';
+      logger.info(autofillProgress.statusText);
+      isAutofilling = false;
+      updatePanelDOM();
+      return;
+    }
+
+    autofillProgress.total = targetFields.length;
+    autofillProgress.statusText = `Generating answers with AI (${settings.model})...`;
+    updatePanelDOM();
+
+    const normalized = normalizeFieldsForAI(targetFields, { overwriteExisting: overwrite });
+    const aiResponse = await generateAutofillAnswers(normalized);
+    const answersMap = new Map(aiResponse.answers.map((a) => [a.fieldId, a]));
+
+    logger.info(`Starting progressive fill of ${targetFields.length} fields...`);
+
+    let filledCount = 0;
+    let failedCount = 0;
+
+    for (let i = 0; i < targetFields.length; i++) {
+      const field = targetFields[i];
+      autofillProgress.current = i + 1;
+      autofillProgress.statusText = `Filling ${i + 1} of ${targetFields.length}: "${field.label}"`;
+      updatePanelDOM();
+
+      const answer = answersMap.get(field.id);
+      if (!answer || answer.value === '' || answer.value === null || answer.value === undefined) {
+        if (field.required || field.element?.getAttribute('data-reject-fill') === 'true') {
+          failedCount++;
+          fieldResultsCache.set(field.id, {
+            status: FILL_STATUS.FAILED,
+            value: field.currentValue || '',
+            error: 'Required field left empty by AI',
+          });
+          highlightFailedField(field.element);
+        } else {
+          fieldResultsCache.set(field.id, {
+            status: FILL_STATUS.SKIPPED,
+            value: field.currentValue,
+          });
+        }
+        continue;
+      }
+
+      scrollToField(field.element);
+      highlightActiveField(field.element);
+
+      // Brief delay for visual animation
+      await new Promise((r) => setTimeout(r, 120));
+
+      fillField(field, answer.value);
+      const verification = verifyField(field, answer.value);
+
+      if (verification.verified) {
+        highlightVerifiedField(field.element);
+        filledCount++;
+        fieldResultsCache.set(field.id, {
+          status: answer.inferred ? FILL_STATUS.INFERRED : FILL_STATUS.VERIFIED,
+          value: verification.actualValue || answer.value,
+          inferred: answer.inferred,
+        });
+      } else {
+        highlightFailedField(field.element);
+        failedCount++;
+        fieldResultsCache.set(field.id, {
+          status: FILL_STATUS.FAILED,
+          value: verification.actualValue || '',
+          error: verification.error || 'Value did not stick in DOM',
+        });
+        logger.warn(`Verification failed for "${field.label}": ${verification.error}`);
+      }
+    }
+
+    autofillProgress.statusText = `Autofill completed! (${filledCount} filled, ${failedCount} failed)`;
+    logger.info(`Autofill finished: ${filledCount} verified, ${failedCount} failed out of ${targetFields.length} fields.`);
+  } catch (err) {
+    logger.error('Autofill execution failed:', err);
+    autofillProgress.statusText = `Error: ${err.message}`;
+  } finally {
+    isAutofilling = false;
+    refreshDetectedFields();
+    updatePanelDOM();
+  }
+}
+
+function openRewriteModal(field) {
+  activeRewriteField = field;
+  rewriteFeedbackInput = '';
+  panelVisible = true;
+  updatePanelDOM();
+}
+
+async function executeFieldRewrite(feedback) {
+  if (!activeRewriteField) return;
+
+  isRewriting = true;
+  updatePanelDOM();
+
+  try {
+    const field = activeRewriteField;
+    const currentVal = field.element?.value || field.currentValue || '';
+
+    const rewritten = await rewriteNarrativeField({
+      fieldLabel: field.label,
+      currentValue: currentVal,
+      feedback,
+      constraints: field.constraints,
+    });
+
+    if (rewritten) {
+      scrollToField(field.element);
+      fillField(field, rewritten);
+      highlightVerifiedField(field.element);
+
+      fieldResultsCache.set(field.id, {
+        status: FILL_STATUS.VERIFIED,
+        value: rewritten,
+      });
+
+      logger.info(`Rewrote and updated field "${field.label}"`);
+    }
+
+    activeRewriteField = null;
+  } catch (err) {
+    logger.error('Rewrite failed:', err);
+    alert(`Rewrite Error: ${err.message}`);
+  } finally {
+    isRewriting = false;
+    refreshDetectedFields();
+    updatePanelDOM();
+  }
+}
+
 function renderPill() {
   const status = getStatusInfo();
+  const fieldCount = detectedFieldsCache.length;
+  const countBadge = fieldCount > 0 ? `<span class="jc-badge jc-badge-blue" style="padding: 1px 5px; font-size: 10px;">${fieldCount}</span>` : '';
+
   return `
     <div class="jc-pill-btn" id="jc-toggle-btn" title="Toggle Job Copilot Panel">
       <div class="jc-status-dot ${status.dotClass}"></div>
       <span>Job Copilot</span>
+      ${countBadge}
     </div>
   `;
 }
@@ -512,8 +837,28 @@ function renderPill() {
 function renderHomeTab() {
   const status = getStatusInfo();
   const settings = getSettings();
-  const currentUrl = window.location.href;
   const currentHost = window.location.hostname;
+  const fieldCount = detectedFieldsCache.length;
+
+  let progressHtml = '';
+  if (isAutofilling || autofillProgress.statusText) {
+    const percent = autofillProgress.total > 0
+      ? Math.round((autofillProgress.current / autofillProgress.total) * 100)
+      : 0;
+
+    progressHtml = `
+      <div class="jc-card" style="border-color: #2563eb;">
+        <div class="jc-row">
+          <span class="jc-card-title">Autofill Progress</span>
+          <span style="font-size: 11px; font-weight: 600; color: #38bdf8;">${autofillProgress.current} / ${autofillProgress.total}</span>
+        </div>
+        <div style="font-size: 12px; color: #f8fafc;">${escapeHtml(autofillProgress.statusText)}</div>
+        <div class="jc-progress-bar-container">
+          <div class="jc-progress-bar" style="width: ${percent}%;"></div>
+        </div>
+      </div>
+    `;
+  }
 
   let testResultHtml = '';
   if (lastAiTestResult) {
@@ -521,8 +866,7 @@ function renderHomeTab() {
       testResultHtml = `
         <div class="jc-alert jc-alert-success">
           <strong>✓ AI Connected</strong> (${lastAiTestResult.latencyMs}ms)<br/>
-          <span style="font-size: 11px; color: #cbd5e1;">Model: ${lastAiTestResult.model}</span><br/>
-          <span style="font-size: 11px; color: #94a3b8;">Response: "${lastAiTestResult.reply}"</span>
+          <span style="font-size: 11px; color: #cbd5e1;">Model: ${lastAiTestResult.model}</span>
         </div>
       `;
     } else {
@@ -547,23 +891,108 @@ function renderHomeTab() {
     </div>
 
     <div class="jc-card">
-      <span class="jc-card-title">Current Context</span>
+      <div class="jc-row">
+        <span class="jc-card-title">Page Form Fields</span>
+        <span class="jc-badge jc-badge-blue">${fieldCount} detected</span>
+      </div>
+      <div class="jc-row" style="margin-top: 4px;">
+        <button class="jc-btn jc-btn-large" id="jc-autofill-btn" style="flex: 1;" ${isAutofilling ? 'disabled' : ''}>
+          ${isAutofilling ? '⚡ Filling Fields...' : '⚡ Autofill This Page'}
+        </button>
+        <button class="jc-btn jc-btn-secondary" id="jc-rescan-btn" title="Rescan page fields" style="padding: 12px;">🔄</button>
+      </div>
+    </div>
+
+    ${progressHtml}
+
+    <div class="jc-card">
+      <span class="jc-card-title">Context & Connectivity</span>
       <div class="jc-row">
         <span class="jc-label">Host</span>
         <span class="jc-val">${currentHost}</span>
       </div>
       <div class="jc-row">
-        <span class="jc-label">Active Model</span>
+        <span class="jc-label">Model</span>
         <span class="jc-val" style="font-family: monospace; font-size: 11px;">${settings.model}</span>
       </div>
-    </div>
-
-    <div class="jc-card">
-      <span class="jc-card-title">OpenRouter Connectivity</span>
-      <button class="jc-btn" id="jc-test-ai-btn" ${isAiTesting ? 'disabled' : ''}>
-        ${isAiTesting ? 'Testing Connection...' : '⚡ Test AI Connection'}
-      </button>
+      <div class="jc-row" style="margin-top: 4px;">
+        <button class="jc-btn jc-btn-secondary" id="jc-test-ai-btn" style="flex: 1;" ${isAiTesting ? 'disabled' : ''}>
+          ${isAiTesting ? 'Testing...' : 'Test AI Connection'}
+        </button>
+      </div>
       ${testResultHtml}
+    </div>
+  `;
+}
+
+function renderReviewTab() {
+  if (detectedFieldsCache.length === 0) {
+    return `
+      <div class="jc-card">
+        <div style="text-align: center; color: #94a3b8; padding: 20px 0;">
+          No form fields detected on this page.<br/>
+          <button class="jc-btn jc-btn-secondary" id="jc-rescan-review-btn" style="margin: 12px auto 0;">🔄 Rescan Form</button>
+        </div>
+      </div>
+    `;
+  }
+
+  const fieldRows = detectedFieldsCache.map((field) => {
+    const result = fieldResultsCache.get(field.id);
+    let statusBadge = '<span class="jc-badge" style="background: #1e293b; color: #94a3b8;">Pending</span>';
+
+    if (result) {
+      if (result.status === FILL_STATUS.VERIFIED) {
+        statusBadge = '<span class="jc-badge jc-badge-green">Verified ✓</span>';
+      } else if (result.status === FILL_STATUS.INFERRED) {
+        statusBadge = '<span class="jc-badge jc-badge-amber">Review ⚠️</span>';
+      } else if (result.status === FILL_STATUS.FAILED) {
+        statusBadge = '<span class="jc-badge jc-badge-red">Failed ✗</span>';
+      } else if (result.status === FILL_STATUS.SKIPPED) {
+        statusBadge = '<span class="jc-badge" style="background: #334155; color: #94a3b8;">Skipped</span>';
+      }
+    }
+
+    let currentVal = '';
+    if (field.type === FIELD_TYPES.RADIO) {
+      const radios = field.elements || [field.element];
+      const checkedRadio = radios.find((r) => r.checked);
+      currentVal = checkedRadio ? (extractOptionLabel(checkedRadio) || checkedRadio.value) : '';
+    } else if (field.type === FIELD_TYPES.CHECKBOX) {
+      currentVal = field.element?.checked ? 'Checked ✓' : 'Unchecked';
+    } else if (field.type === FIELD_TYPES.SELECT) {
+      const sel = field.element;
+      const opt = sel?.options?.[sel?.selectedIndex];
+      currentVal = opt && opt.value !== '' ? (opt.text.trim() || opt.value) : '';
+    } else {
+      currentVal = field.element?.value || field.element?.textContent || field.currentValue || '';
+    }
+
+    const rewriteBtn = field.isNarrative
+      ? `<button class="jc-btn jc-btn-secondary jc-btn-small jc-field-rewrite-btn" data-field-id="${field.id}">✨ Rewrite</button>`
+      : '';
+
+    return `
+      <div class="jc-field-row">
+        <div class="jc-field-header">
+          <span class="jc-field-name">${escapeHtml(field.label || field.id)}</span>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            ${statusBadge}
+            ${rewriteBtn}
+          </div>
+        </div>
+        <div class="jc-field-val-preview">${escapeHtml(currentVal || '(empty)')}</div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="jc-row" style="margin-bottom: 4px;">
+      <span class="jc-card-title">Form Fields (${detectedFieldsCache.length})</span>
+      <button class="jc-btn jc-btn-secondary jc-btn-small" id="jc-rescan-review-btn">🔄 Rescan</button>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      ${fieldRows}
     </div>
   `;
 }
@@ -665,7 +1094,7 @@ function renderSettingsTab() {
         <div class="jc-toggle-row">
           <div>
             <div class="jc-label">AI Autofill</div>
-            <div style="font-size: 11px; color: #64748b;">Scan and auto-fill form fields</div>
+            <div style="font-size: 11px; color: #64748b;">Enable AI form filling capabilities</div>
           </div>
           <label class="jc-switch">
             <input type="checkbox" name="autofillEnabled" ${settings.autofillEnabled ? 'checked' : ''} />
@@ -675,8 +1104,19 @@ function renderSettingsTab() {
 
         <div class="jc-toggle-row">
           <div>
+            <div class="jc-label">Overwrite Existing Values</div>
+            <div style="font-size: 11px; color: #64748b;">Overwrite non-empty fields on autofill</div>
+          </div>
+          <label class="jc-switch">
+            <input type="checkbox" name="overwriteExisting" ${settings.overwriteExisting ? 'checked' : ''} />
+            <span class="jc-slider"></span>
+          </label>
+        </div>
+
+        <div class="jc-toggle-row">
+          <div>
             <div class="jc-label">Auto Continue</div>
-            <div style="font-size: 11px; color: #64748b;">Advance to next step on valid page</div>
+            <div style="font-size: 11px; color: #64748b;">Advance to next step on valid page (Phase 3)</div>
           </div>
           <label class="jc-switch">
             <input type="checkbox" name="autoContinue" ${settings.autoContinue ? 'checked' : ''} />
@@ -691,17 +1131,6 @@ function renderSettingsTab() {
           </div>
           <label class="jc-switch">
             <input type="checkbox" name="autoSubmit" ${settings.autoSubmit ? 'checked' : ''} />
-            <span class="jc-slider"></span>
-          </label>
-        </div>
-
-        <div class="jc-toggle-row">
-          <div>
-            <div class="jc-label">Autopilot Mode</div>
-            <div style="font-size: 11px; color: #64748b;">Autonomous multi-step progression</div>
-          </div>
-          <label class="jc-switch">
-            <input type="checkbox" name="autopilot" ${settings.autopilot ? 'checked' : ''} />
             <span class="jc-slider"></span>
           </label>
         </div>
@@ -769,50 +1198,40 @@ function renderDebugTab() {
   `;
 }
 
-function escapeHtml(str) {
-  if (str === null || str === undefined) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
+function renderRewriteModal() {
+  if (!activeRewriteField) return '';
 
-let ttPolicy = null;
+  const currentVal = activeRewriteField.element?.value || activeRewriteField.currentValue || '';
 
-function getTrustedHTML(htmlString) {
-  if (typeof window !== 'undefined' && window.trustedTypes && typeof window.trustedTypes.createPolicy === 'function') {
-    if (!ttPolicy) {
-      try {
-        ttPolicy = window.trustedTypes.createPolicy('job-copilot-ui', {
-          createHTML: (s) => s,
-        });
-      } catch {
-        ttPolicy = window.trustedTypes.defaultPolicy || { createHTML: (s) => s };
-      }
-    }
-    try {
-      return ttPolicy.createHTML ? ttPolicy.createHTML(htmlString) : htmlString;
-    } catch {
-      return htmlString;
-    }
-  }
-  return htmlString;
-}
-
-function setSafeHTML(element, htmlString) {
-  try {
-    element.innerHTML = getTrustedHTML(htmlString);
-  } catch (err) {
-    try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(htmlString, 'text/html');
-      element.replaceChildren(...doc.body.childNodes);
-    } catch (parseErr) {
-      console.warn('[JobCopilot:UI] Fallback HTML assignment failed:', parseErr);
-    }
-  }
+  return `
+    <div class="jc-modal-overlay" id="jc-rewrite-modal-overlay">
+      <div class="jc-modal">
+        <div class="jc-row">
+          <strong style="font-size: 13px; color: #f8fafc;">✨ Rewrite Response</strong>
+          <button class="jc-close-btn" id="jc-cancel-rewrite-btn">✕</button>
+        </div>
+        <div style="font-size: 11px; color: #94a3b8;">
+          <strong>Field:</strong> ${escapeHtml(activeRewriteField.label)}
+        </div>
+        <div class="jc-form-group">
+          <label>Current Text</label>
+          <div style="max-height: 80px; overflow-y: auto; background: #090d16; padding: 6px 8px; border-radius: 6px; font-size: 11px; color: #cbd5e1;">
+            ${escapeHtml(currentVal || '(empty)')}
+          </div>
+        </div>
+        <div class="jc-form-group">
+          <label>Revision Feedback / Custom Instructions</label>
+          <input class="jc-input" id="jc-rewrite-feedback-input" type="text" placeholder="e.g. Make it more concise, emphasize cloud leadership" />
+        </div>
+        <div class="jc-row" style="margin-top: 6px;">
+          <button class="jc-btn jc-btn-secondary" id="jc-cancel-rewrite-btn-2" style="flex: 1;">Cancel</button>
+          <button class="jc-btn" id="jc-submit-rewrite-btn" style="flex: 1;" ${isRewriting ? 'disabled' : ''}>
+            ${isRewriting ? 'Generating...' : '✨ Rewrite & Replace'}
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function updatePanelDOM() {
@@ -821,12 +1240,11 @@ function updatePanelDOM() {
   const container = shadowRootRef.querySelector('.jc-widget-container');
   if (!container) return;
 
-  const status = getStatusInfo();
-
   let panelHtml = '';
   if (panelVisible) {
     let tabContent = '';
     if (currentTab === 'home') tabContent = renderHomeTab();
+    else if (currentTab === 'review') tabContent = renderReviewTab();
     else if (currentTab === 'profile') tabContent = renderProfileTab();
     else if (currentTab === 'settings') tabContent = renderSettingsTab();
     else if (currentTab === 'debug') tabContent = renderDebugTab();
@@ -844,6 +1262,7 @@ function updatePanelDOM() {
 
         <div class="jc-nav-tabs">
           <button class="jc-tab-btn ${currentTab === 'home' ? 'active' : ''}" data-tab="home">Home</button>
+          <button class="jc-tab-btn ${currentTab === 'review' ? 'active' : ''}" data-tab="review">Review</button>
           <button class="jc-tab-btn ${currentTab === 'profile' ? 'active' : ''}" data-tab="profile">Profile</button>
           <button class="jc-tab-btn ${currentTab === 'settings' ? 'active' : ''}" data-tab="settings">Settings</button>
           <button class="jc-tab-btn ${currentTab === 'debug' ? 'active' : ''}" data-tab="debug">Debug</button>
@@ -852,6 +1271,8 @@ function updatePanelDOM() {
         <div class="jc-content">
           ${tabContent}
         </div>
+
+        ${renderRewriteModal()}
       </div>
     `;
   }
@@ -872,6 +1293,7 @@ function attachEventHandlers() {
   if (toggleBtn) {
     toggleBtn.onclick = () => {
       panelVisible = !panelVisible;
+      if (panelVisible) refreshDetectedFields();
       updatePanelDOM();
     };
   }
@@ -885,19 +1307,47 @@ function attachEventHandlers() {
     };
   }
 
-  // Tab buttons
+  // Tab navigation
   const tabBtns = shadowRootRef.querySelectorAll('.jc-tab-btn');
   tabBtns.forEach((btn) => {
     btn.onclick = () => {
       const targetTab = btn.getAttribute('data-tab');
       if (targetTab) {
         currentTab = targetTab;
+        if (targetTab === 'review') refreshDetectedFields();
         updatePanelDOM();
       }
     };
   });
 
-  // Home: Test AI button
+  // Autofill button
+  const autofillBtn = shadowRootRef.querySelector('#jc-autofill-btn');
+  if (autofillBtn) {
+    autofillBtn.onclick = () => {
+      executeAutofillFlow();
+    };
+  }
+
+  // Rescan buttons
+  const rescanBtn = shadowRootRef.querySelector('#jc-rescan-btn');
+  if (rescanBtn) {
+    rescanBtn.onclick = () => {
+      refreshDetectedFields();
+      logger.info(`Rescanned form: ${detectedFieldsCache.length} fields detected.`);
+      updatePanelDOM();
+    };
+  }
+
+  const rescanReviewBtn = shadowRootRef.querySelector('#jc-rescan-review-btn');
+  if (rescanReviewBtn) {
+    rescanReviewBtn.onclick = () => {
+      refreshDetectedFields();
+      logger.info(`Rescanned form: ${detectedFieldsCache.length} fields detected.`);
+      updatePanelDOM();
+    };
+  }
+
+  // Test AI button
   const testAiBtn = shadowRootRef.querySelector('#jc-test-ai-btn');
   if (testAiBtn) {
     testAiBtn.onclick = async () => {
@@ -914,7 +1364,34 @@ function attachEventHandlers() {
     };
   }
 
-  // Profile Form submit
+  // Review Tab: Rewrite buttons for specific fields
+  const rewriteBtns = shadowRootRef.querySelectorAll('.jc-field-rewrite-btn');
+  rewriteBtns.forEach((btn) => {
+    btn.onclick = () => {
+      const fieldId = btn.getAttribute('data-field-id');
+      const target = detectedFieldsCache.find((f) => f.id === fieldId);
+      if (target) {
+        openRewriteModal(target);
+      }
+    };
+  });
+
+  // Rewrite Modal handlers
+  const cancelRewriteBtn = shadowRootRef.querySelector('#jc-cancel-rewrite-btn');
+  const cancelRewriteBtn2 = shadowRootRef.querySelector('#jc-cancel-rewrite-btn-2');
+  if (cancelRewriteBtn) cancelRewriteBtn.onclick = () => { activeRewriteField = null; updatePanelDOM(); };
+  if (cancelRewriteBtn2) cancelRewriteBtn2.onclick = () => { activeRewriteField = null; updatePanelDOM(); };
+
+  const submitRewriteBtn = shadowRootRef.querySelector('#jc-submit-rewrite-btn');
+  if (submitRewriteBtn) {
+    submitRewriteBtn.onclick = () => {
+      const feedbackInput = shadowRootRef.querySelector('#jc-rewrite-feedback-input');
+      const feedback = feedbackInput ? feedbackInput.value.trim() : '';
+      executeFieldRewrite(feedback);
+    };
+  }
+
+  // Profile Form
   const profileForm = shadowRootRef.querySelector('#jc-profile-form');
   if (profileForm) {
     profileForm.onsubmit = (e) => {
@@ -942,10 +1419,9 @@ function attachEventHandlers() {
     };
   }
 
-  // Settings Form submit
+  // Settings Form
   const settingsForm = shadowRootRef.querySelector('#jc-settings-form');
   if (settingsForm) {
-    // Model dropdown dynamic switch
     const modelSelect = shadowRootRef.querySelector('#jc-model-select');
     const customInput = shadowRootRef.querySelector('#jc-custom-model-input');
     if (modelSelect && customInput) {
@@ -959,7 +1435,6 @@ function attachEventHandlers() {
       };
     }
 
-    // Toggle API Key visibility
     const toggleKeyBtn = shadowRootRef.querySelector('#jc-toggle-key-btn');
     const apiKeyInput = shadowRootRef.querySelector('#jc-api-key-input');
     if (toggleKeyBtn && apiKeyInput) {
@@ -981,9 +1456,9 @@ function attachEventHandlers() {
       const newSettings = {
         model: selectedModel,
         autofillEnabled: formData.get('autofillEnabled') === 'on',
+        overwriteExisting: formData.get('overwriteExisting') === 'on',
         autoContinue: formData.get('autoContinue') === 'on',
         autoSubmit: formData.get('autoSubmit') === 'on',
-        autopilot: formData.get('autopilot') === 'on',
       };
 
       saveSettings(newSettings);
@@ -1038,18 +1513,35 @@ export function mountUI() {
   const target = document.body || document.documentElement;
   if (target) {
     target.appendChild(rootElement);
+    refreshDetectedFields();
     updatePanelDOM();
-    logger.info('Job Copilot Shadow DOM UI mounted successfully.');
-  } else {
-    window.addEventListener('DOMContentLoaded', () => {
-      (document.body || document.documentElement).appendChild(rootElement);
-      updatePanelDOM();
-      logger.info('Job Copilot Shadow DOM UI mounted on DOMContentLoaded.');
+    initInlineRewriteBadge((targetInput) => {
+      const field = detectedFieldsCache.find((f) => f.element === targetInput);
+      if (field) {
+        openRewriteModal(field);
+      } else {
+        openRewriteModal({
+          id: targetInput.id || 'narrative_field',
+          label: targetInput.getAttribute('aria-label') || targetInput.placeholder || 'Narrative Response',
+          element: targetInput,
+          currentValue: targetInput.value || '',
+          isNarrative: true,
+          constraints: {},
+        });
+      }
     });
+
+    startFormObserver(() => {
+      refreshDetectedFields();
+      updatePanelDOM();
+    });
+
+    logger.info('Job Copilot Shadow DOM UI mounted successfully.');
   }
 }
 
 export function toggleUIVisibility() {
   panelVisible = !panelVisible;
+  if (panelVisible) refreshDetectedFields();
   updatePanelDOM();
 }
