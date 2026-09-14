@@ -10,7 +10,7 @@ import {
 } from './storage.js';
 import { logger } from './debug.js';
 import { testConnection, generateAutofillAnswers, rewriteNarrativeField } from './ai.js';
-import { scanFormFields } from './fields/scanner.js';
+import { scanFormFields, harvestComboboxOptions } from './fields/scanner.js';
 import { extractOptionLabel } from './fields/labels.js';
 import { normalizeFieldsForAI } from './fields/normalize.js';
 import { fillField } from './fields/fillers.js';
@@ -737,6 +737,12 @@ async function executeAutofillFlow() {
     }
 
     autofillProgress.total = targetFields.length;
+    autofillProgress.statusText = 'Harvesting combobox options...';
+    updatePanelDOM();
+
+    // Dynamically open comboboxes that had zero options at scan time to read their rendered options
+    await harvestComboboxOptions(targetFields);
+
     autofillProgress.statusText = `Generating answers with AI (${settings.model})...`;
     updatePanelDOM();
 

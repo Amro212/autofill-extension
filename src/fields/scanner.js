@@ -1,5 +1,6 @@
 import { FIELD_TYPES, UI_IDS } from '../constants.js';
 import { extractLabel, extractGroupLabel, extractOptionLabel, extractDescription } from './labels.js';
+import { logger } from '../debug.js';
 
 let fieldCounter = 0;
 
@@ -50,47 +51,62 @@ function buildFieldSelector(el) {
 function extractComboboxOptionsAndValue(el, root) {
   const options = [];
   let currentValue = '';
+  const fieldLabel = el.getAttribute('aria-label') || el.closest('label')?.textContent?.trim()?.slice(0, 40) || el.id || '(unknown)';
 
-  // 1. Linked listbox via aria-controls / aria-owns
+  // 1. Linked listbox via aria-controls / aria-owns (most reliable)
   const controlsId = el.getAttribute('aria-controls') || el.getAttribute('aria-owns');
   let listbox = controlsId ? (root.getElementById ? root.getElementById(controlsId) : document.getElementById(controlsId)) : null;
 
-  // 2. Look for react-select, emotion-styled, or adjacent dropdown container
+  // 2. Find the TIGHT container — avoid overly broad selectors like [class*="-container"]
+  //    which can match the entire page wrapper and cross-contaminate options between fields.
   const container =
     el.closest('[data-testid*="select"], [class*="select-shell"], [class*="select__container"]') ||
-    el.closest('.form-group, .field, [class*="-container"], [role="combobox"]') ||
+    el.closest('[role="combobox"]') ||
+    el.closest('.form-group, .field') ||
     el.parentElement;
+
   if (!listbox && container) {
-    listbox = container.querySelector('[role="listbox"], .select__menu, ul');
+    // Only look for specific dropdown structures, NOT bare 'ul' which matches navigation lists etc.
+    listbox = container.querySelector('[role="listbox"], .select__menu, [class*="menu-list"]');
   }
 
-  // 2b. Also check portaled menus on document.body (many libs render there)
-  if (!listbox) {
-    listbox = document.querySelector('[role="listbox"], .select__menu, [class*="menu-list"]');
-  }
+  // NOTE: We intentionally do NOT fall back to document.querySelector here.
+  // At scan time, no dropdowns should be open, so a global search would find stale/wrong menus.
+  // The harvestComboboxOptions() function handles dynamic discovery at fill time instead.
 
   // If listbox found, harvest options
   if (listbox) {
-    const optEls = listbox.querySelectorAll('[role="option"], li, .select__option');
+    const optEls = listbox.querySelectorAll('[role="option"], .select__option');
     for (const opt of optEls) {
       const text = opt.textContent?.trim();
       const val = opt.getAttribute('data-value') || opt.getAttribute('value') || text;
-      if (text && !/select|choose|\.\.\./i.test(text)) {
+      if (text && text.length < 200 && !/select|choose|\.\.\./i.test(text)) {
         options.push({ value: val, label: text });
       }
     }
+    logger.info(`Scan[${fieldLabel}]: found ${options.length} options from open listbox`);
   }
 
-  // 3. Look for hidden backing select element
-  if (container) {
-    const hiddenSelect = container.querySelector('select');
+  // 3. Look for hidden backing <select> element — but ONLY if it's tightly scoped.
+  //    Check that the <select> is a direct child or very close descendant, not from another field.
+  if (options.length === 0 && container) {
+    // Only look within the immediate combobox container (el itself or its direct parent)
+    const tightScope = el.closest('[role="combobox"]') || el.parentElement;
+    const hiddenSelect = tightScope?.querySelector('select');
     if (hiddenSelect && hiddenSelect.options.length > 0) {
       for (const opt of hiddenSelect.options) {
         if (opt.value && !/select|choose|--/i.test(opt.text)) {
           options.push({ value: opt.value, label: opt.text.trim() });
         }
       }
+      if (options.length > 0) {
+        logger.info(`Scan[${fieldLabel}]: found ${options.length} options from backing <select>`);
+      }
     }
+  }
+
+  if (options.length === 0) {
+    logger.info(`Scan[${fieldLabel}]: no options found at scan time (will harvest dynamically)`);
   }
 
   // 4. Current value resolution
@@ -347,4 +363,154 @@ export function scanFormFields(root = document) {
   }
 
   return detectedFields;
+}
+
+/**
+ * Dynamically harvests options for combobox fields that returned zero options
+ * from the static scan. Opens each dropdown briefly, reads the rendered options,
+ * then closes it — all before the AI request so it receives exact option labels.
+ */
+export async function harvestComboboxOptions(fields) {
+  const comboboxesNeedingOptions = fields.filter(
+    (f) => f.type === FIELD_TYPES.COMBOBOX && (!f.options || f.options.length === 0)
+  );
+
+  if (comboboxesNeedingOptions.length === 0) {
+    logger.info('Harvest: all comboboxes already have options, skipping.');
+    return fields;
+  }
+
+  logger.info(`Harvest: ${comboboxesNeedingOptions.length} combobox(es) need dynamic option discovery.`);
+
+  for (const field of comboboxesNeedingOptions) {
+    try {
+      const el = field.element;
+      if (!el) {
+        logger.warn(`Harvest: skipping "${field.label}" — element is null.`);
+        continue;
+      }
+
+      logger.info(`Harvest: opening dropdown for "${field.label}"...`);
+
+      // --- Resolve combobox parts (mirrors fillers.js resolveComboboxParts) ---
+      const container =
+        el.closest('[data-testid*="select"], [class*="select-shell"], [class*="select__container"]') ||
+        el.closest('.form-group, .field, [class*="-container"], [role="combobox"]') ||
+        el.parentElement?.closest('.form-group, .field, [class*="-container"]') ||
+        el.parentElement ||
+        el;
+
+      const input = (el instanceof HTMLInputElement)
+        ? el
+        : container.querySelector('input:not([type="hidden"])') || el.querySelector?.('input:not([type="hidden"])');
+
+      const toggleBtn =
+        container.querySelector('button[aria-label*="toggle" i], button[aria-label*="open" i], .select__indicators button, [class*="indicator"], [class*="arrow"], [class*="dropdown-arrow"]') ||
+        container.querySelector('button');
+
+      const controlBox =
+        container.querySelector('.select__control, [class*="control"], [class*="combobox-input"]') ||
+        el;
+
+      // --- Dismiss any currently open dropdowns ---
+      try {
+        document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true
+        }));
+      } catch {}
+      try {
+        if (document.activeElement && document.activeElement !== document.body) {
+          document.activeElement.blur();
+        }
+      } catch {}
+      await new Promise((r) => setTimeout(r, 100));
+
+      // --- Open this dropdown ---
+      if (controlBox && controlBox !== input) {
+        try {
+          controlBox.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true }));
+          controlBox.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, composed: true }));
+          controlBox.click();
+        } catch {}
+      }
+      if (input) {
+        try { input.focus(); } catch {}
+        try {
+          input.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true }));
+          input.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, composed: true }));
+          input.click();
+        } catch {}
+      }
+
+      // Wait for dropdown to render
+      await new Promise((r) => setTimeout(r, 300));
+
+      // If no listbox appeared, try the toggle button
+      let hasMenu = document.querySelector('[role="listbox"], .select__menu, [class*="menu-list"]');
+      if (!hasMenu && toggleBtn && toggleBtn !== controlBox) {
+        try { toggleBtn.click(); } catch {}
+        await new Promise((r) => setTimeout(r, 200));
+      }
+
+      // --- Discover options ---
+      const harvested = [];
+
+      // 1. Via aria-controls/aria-owns
+      const ariaSource = el.getAttribute?.('aria-controls') || el.getAttribute?.('aria-owns') ||
+        container.querySelector('[aria-controls], [aria-owns]')?.getAttribute?.('aria-controls') ||
+        container.querySelector('[aria-controls], [aria-owns]')?.getAttribute?.('aria-owns');
+      let listbox = ariaSource ? document.getElementById(ariaSource) : null;
+
+      // 2. Inside the container
+      if (!listbox) {
+        listbox = container.querySelector('[role="listbox"], .select__menu, [class*="menu-list"], ul[role="listbox"]');
+      }
+
+      // 3. Portaled menu fallback (only if exactly one is open)
+      if (!listbox) {
+        const allMenus = document.querySelectorAll('[role="listbox"], .select__menu, [class*="menu-list"]');
+        if (allMenus.length === 1) listbox = allMenus[0];
+      }
+
+      if (listbox) {
+        const optEls = listbox.querySelectorAll('[role="option"], li, .select__option');
+        for (const opt of optEls) {
+          const text = (opt.textContent || '').trim();
+          const val = opt.getAttribute('data-value') || opt.getAttribute('value') || text;
+          if (text && text.length < 200 && !/select\.\.\.|choose\.\.\./i.test(text)) {
+            // Deduplicate by label
+            if (!harvested.some((h) => h.label === text)) {
+              harvested.push({ value: val, label: text });
+            }
+          }
+        }
+      }
+
+      // --- Close the dropdown ---
+      try {
+        (input || el).dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true
+        }));
+      } catch {}
+      try {
+        if (document.activeElement && document.activeElement !== document.body) {
+          document.activeElement.blur();
+        }
+      } catch {}
+      await new Promise((r) => setTimeout(r, 150));
+
+      // --- Attach harvested options to the field ---
+      if (harvested.length > 0) {
+        field.options = harvested;
+        logger.info(`Harvest: found ${harvested.length} options for "${field.label}" (first: "${harvested[0].label}")`);
+      } else {
+        logger.warn(`Harvest: no options found for "${field.label}" after opening dropdown.`);
+      }
+    } catch (err) {
+      logger.warn(`Harvest: error processing "${field.label}": ${err.message}`);
+    }
+  }
+
+  logger.info('Harvest: dynamic option discovery complete.');
+  return fields;
 }

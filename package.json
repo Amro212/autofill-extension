@@ -1,6 +1,6 @@
 {
   "name": "job-copilot",
-  "version": "0.2.4",
+  "version": "0.2.7",
   "description": "Job Copilot — Tampermonkey userscript for AI job applications",
   "main": "dist/job-copilot.user.js",
   "type": "module",
@@ -20,6 +20,7 @@
   "author": "Job Copilot Team",
   "license": "MIT",
   "devDependencies": {
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.25.0",
+    "jsdom": "^30.0.1"
   }
 }

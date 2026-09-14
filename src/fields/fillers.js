@@ -1,5 +1,6 @@
 import { FIELD_TYPES } from '../constants.js';
 import { extractOptionLabel } from './labels.js';
+import { logger } from '../debug.js';
 
 function setNativeInputValue(element, value) {
   try {
@@ -491,41 +492,52 @@ export async function fillCombobox(element, targetValue) {
   if (!strVal) return false;
 
   const targetLower = strVal.toLowerCase();
+  const fieldHint = element.getAttribute('aria-label') || element.id || '(combobox)';
 
   try {
     const { container, input, toggleBtn, controlBox } = resolveComboboxParts(element);
+    logger.info(`Fill[${fieldHint}]: target="${strVal}", hasInput=${!!input}, hasToggle=${!!toggleBtn}`);
 
     // === Step 0: Dismiss any previously open dropdowns ===
     await dismissOpenDropdowns();
 
     // === Step 1: Open THIS dropdown ===
     await openDropdown(input, controlBox, toggleBtn);
+    logger.info(`Fill[${fieldHint}]: dropdown opened`);
 
     // === Step 2: Type search text to filter options ===
     // Use a short prefix first (3-6 chars) — enough to narrow, not so much it over-filters
     const searchPrefix = strVal.length > 6 ? strVal.slice(0, 6) : strVal;
     if (input) {
       await typeSearchText(input, searchPrefix);
+      logger.info(`Fill[${fieldHint}]: typed search prefix "${searchPrefix}"`);
     }
 
-    // Wait for framework to filter/render options
-    await new Promise(r => setTimeout(r, 200));
+    // Wait for framework to filter/render options — poll with retries for async loaders
+    let options = [];
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await new Promise(r => setTimeout(r, attempt === 0 ? 200 : 400));
+      options = discoverOptions(container, element);
+      if (options.length > 0) break;
+      logger.info(`Fill[${fieldHint}]: no options yet after ${(attempt + 1) * (attempt === 0 ? 200 : 400)}ms, retrying...`);
+    }
 
-    // === Step 3: Discover available options (scoped to THIS field) ===
-    let options = discoverOptions(container, element);
+    logger.info(`Fill[${fieldHint}]: discovered ${options.length} options after prefix search`);
 
     // If no options found with prefix, retry with full text
     if (options.length === 0 && input && searchPrefix !== strVal) {
       await typeSearchText(input, strVal);
-      await new Promise(r => setTimeout(r, 200));
+      await new Promise(r => setTimeout(r, 300));
       options = discoverOptions(container, element);
+      logger.info(`Fill[${fieldHint}]: retried with full text, found ${options.length} options`);
     }
 
     // If still no options, try re-opening (some frameworks close on input clear)
     if (options.length === 0) {
       await openDropdown(input, controlBox, toggleBtn);
-      await new Promise(r => setTimeout(r, 150));
+      await new Promise(r => setTimeout(r, 200));
       options = discoverOptions(container, element);
+      logger.info(`Fill[${fieldHint}]: re-opened dropdown, found ${options.length} options`);
     }
 
     // === Step 4: Find the best matching option ===
@@ -540,7 +552,19 @@ export async function fillCombobox(element, targetValue) {
       } catch {}
       await new Promise(r => setTimeout(r, 200));
       const allOptions = discoverOptions(container, element);
+      logger.info(`Fill[${fieldHint}]: cleared filter, found ${allOptions.length} unfiltered options`);
       matchedOpt = findBestOption(allOptions, targetLower);
+    }
+
+    if (matchedOpt) {
+      const matchText = (matchedOpt.textContent || '').trim();
+      logger.info(`Fill[${fieldHint}]: best match = "${matchText}"`);
+    } else {
+      logger.warn(`Fill[${fieldHint}]: no matching option found for "${strVal}" among ${options.length} options`);
+      if (options.length > 0) {
+        const sample = options.slice(0, 3).map(o => (o.textContent || '').trim()).join(', ');
+        logger.warn(`Fill[${fieldHint}]: sample options: ${sample}...`);
+      }
     }
 
     // === Step 5: Click the matched option ===
@@ -556,6 +580,7 @@ export async function fillCombobox(element, targetValue) {
       didSelect = checkSelectionStuck(container);
       if (!didSelect) {
         // Retry click once more
+        logger.info(`Fill[${fieldHint}]: first click didn't stick, retrying...`);
         clickOption(matchedOpt);
         await new Promise(r => setTimeout(r, 100));
         didSelect = checkSelectionStuck(container);
@@ -570,11 +595,13 @@ export async function fillCombobox(element, targetValue) {
       const lastChanceOptions = discoverOptions(container, element);
       const lastChanceMatch = findBestOption(lastChanceOptions, targetLower);
       if (lastChanceMatch) {
+        logger.info(`Fill[${fieldHint}]: last-chance match found after full text type`);
         clickOption(lastChanceMatch);
         await new Promise(r => setTimeout(r, 100));
         didSelect = checkSelectionStuck(container);
       } else {
         // Absolute last resort — Enter key to commit typed text
+        logger.info(`Fill[${fieldHint}]: no options found, pressing Enter as last resort`);
         try {
           input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
           input.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
@@ -584,6 +611,8 @@ export async function fillCombobox(element, targetValue) {
         didSelect = checkSelectionStuck(container);
       }
     }
+
+    logger.info(`Fill[${fieldHint}]: result = ${didSelect ? 'SUCCESS' : 'FAILED'}`);
 
     // === Step 6: Update backing hidden <select> if present ===
     if (didSelect) {
@@ -608,7 +637,7 @@ export async function fillCombobox(element, targetValue) {
 
     return didSelect;
   } catch (err) {
-    console.warn('[JobCopilot:Filler] fillCombobox error:', err);
+    logger.error(`Fill[${fieldHint}]: fillCombobox error: ${err.message}`);
     return false;
   }
 }
