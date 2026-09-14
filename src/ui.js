@@ -23,7 +23,49 @@ import {
   clearHighlights,
   initInlineRewriteBadge,
 } from './fields/highlight.js';
-import { startFormObserver } from './observer.js';
+import { startFormObserver, pauseFormObserver, resumeFormObserver } from './observer.js';
+
+function resolveLiveElement(field) {
+  if (!field) return null;
+
+  try {
+    if (field.element && field.element.isConnected) {
+      return field.element;
+    }
+  } catch {}
+
+  if (field.id) {
+    try {
+      const byId = document.getElementById(field.id);
+      if (byId && byId.isConnected) {
+        field.element = byId;
+        return byId;
+      }
+    } catch {}
+  }
+
+  if (field.selector) {
+    try {
+      const bySelector = document.querySelector(field.selector);
+      if (bySelector && bySelector.isConnected) {
+        field.element = bySelector;
+        return bySelector;
+      }
+    } catch {}
+  }
+
+  if (field.name) {
+    try {
+      const byName = document.querySelector(`[name="${CSS.escape(field.name)}"]`);
+      if (byName && byName.isConnected) {
+        field.element = byName;
+        return byName;
+      }
+    } catch {}
+  }
+
+  return field.element;
+}
 
 let shadowRootRef = null;
 let currentTab = 'home';
@@ -671,6 +713,7 @@ async function executeAutofillFlow() {
   isAutofilling = true;
   autofillProgress = { current: 0, total: 0, statusText: 'Scanning page fields...' };
   updatePanelDOM();
+  pauseFormObserver();
 
   try {
     refreshDetectedFields();
@@ -712,51 +755,75 @@ async function executeAutofillFlow() {
       autofillProgress.statusText = `Filling ${i + 1} of ${targetFields.length}: "${field.label}"`;
       updatePanelDOM();
 
-      const answer = answersMap.get(field.id);
-      if (!answer || answer.value === '' || answer.value === null || answer.value === undefined) {
-        if (field.required || field.element?.getAttribute('data-reject-fill') === 'true') {
+      try {
+        // Resolve live element in case previous mutations/re-renders detached old nodes
+        field.element = resolveLiveElement(field);
+
+        const answer = answersMap.get(field.id);
+        if (!answer || answer.value === '' || answer.value === null || answer.value === undefined) {
+          if (field.required || field.element?.getAttribute('data-reject-fill') === 'true') {
+            failedCount++;
+            fieldResultsCache.set(field.id, {
+              status: FILL_STATUS.FAILED,
+              value: field.currentValue || '',
+              error: 'Required field left empty by AI',
+            });
+            highlightFailedField(field.element);
+          } else {
+            fieldResultsCache.set(field.id, {
+              status: FILL_STATUS.SKIPPED,
+              value: field.currentValue,
+            });
+          }
+          continue;
+        }
+
+        scrollToField(field.element);
+        highlightActiveField(field.element);
+
+        // Brief delay for visual animation
+        await new Promise((r) => setTimeout(r, 100));
+
+        await fillField(field, answer.value);
+
+        // Allow micro-delay for React/framework state settling
+        // Comboboxes need more time because the framework processes click → state update → re-render
+        const settleDelay = field.type === 'combobox' ? 250 : 80;
+        await new Promise((r) => setTimeout(r, settleDelay));
+
+        // Re-resolve element before verification if DOM was mutated
+        field.element = resolveLiveElement(field);
+        const verification = await verifyField(field, answer.value);
+
+        if (verification.verified) {
+          highlightVerifiedField(field.element);
+          filledCount++;
+          fieldResultsCache.set(field.id, {
+            status: answer.inferred ? FILL_STATUS.INFERRED : FILL_STATUS.VERIFIED,
+            value: verification.actualValue || answer.value,
+            inferred: answer.inferred,
+          });
+        } else {
+          highlightFailedField(field.element);
           failedCount++;
           fieldResultsCache.set(field.id, {
             status: FILL_STATUS.FAILED,
-            value: field.currentValue || '',
-            error: 'Required field left empty by AI',
+            value: verification.actualValue || '',
+            error: verification.error || 'Value did not stick in DOM',
           });
-          highlightFailedField(field.element);
-        } else {
-          fieldResultsCache.set(field.id, {
-            status: FILL_STATUS.SKIPPED,
-            value: field.currentValue,
-          });
+          logger.warn(`Verification failed for "${field.label}": ${verification.error}`);
         }
-        continue;
-      }
-
-      scrollToField(field.element);
-      highlightActiveField(field.element);
-
-      // Brief delay for visual animation
-      await new Promise((r) => setTimeout(r, 120));
-
-      fillField(field, answer.value);
-      const verification = verifyField(field, answer.value);
-
-      if (verification.verified) {
-        highlightVerifiedField(field.element);
-        filledCount++;
-        fieldResultsCache.set(field.id, {
-          status: answer.inferred ? FILL_STATUS.INFERRED : FILL_STATUS.VERIFIED,
-          value: verification.actualValue || answer.value,
-          inferred: answer.inferred,
-        });
-      } else {
-        highlightFailedField(field.element);
+      } catch (fieldErr) {
+        logger.error(`Error filling field "${field.label}":`, fieldErr);
         failedCount++;
         fieldResultsCache.set(field.id, {
           status: FILL_STATUS.FAILED,
-          value: verification.actualValue || '',
-          error: verification.error || 'Value did not stick in DOM',
+          value: '',
+          error: fieldErr?.message || 'Field execution failed',
         });
-        logger.warn(`Verification failed for "${field.label}": ${verification.error}`);
+        try {
+          highlightFailedField(field.element);
+        } catch {}
       }
     }
 
@@ -767,6 +834,7 @@ async function executeAutofillFlow() {
     autofillProgress.statusText = `Error: ${err.message}`;
   } finally {
     isAutofilling = false;
+    resumeFormObserver();
     refreshDetectedFields();
     updatePanelDOM();
   }
@@ -787,6 +855,7 @@ async function executeFieldRewrite(feedback) {
 
   try {
     const field = activeRewriteField;
+    field.element = resolveLiveElement(field);
     const currentVal = field.element?.value || field.currentValue || '';
 
     const rewritten = await rewriteNarrativeField({
@@ -798,7 +867,7 @@ async function executeFieldRewrite(feedback) {
 
     if (rewritten) {
       scrollToField(field.element);
-      fillField(field, rewritten);
+      await fillField(field, rewritten);
       highlightVerifiedField(field.element);
 
       fieldResultsCache.set(field.id, {

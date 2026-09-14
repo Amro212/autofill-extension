@@ -37,6 +37,81 @@ function extractConstraints(el) {
   return constraints;
 }
 
+function buildFieldSelector(el) {
+  try {
+    if (el.id) return `#${CSS.escape(el.id)}`;
+    if (el.name) return `[name="${CSS.escape(el.name)}"]`;
+    const ariaLabel = el.getAttribute('aria-label');
+    if (ariaLabel) return `[aria-label="${CSS.escape(ariaLabel)}"]`;
+  } catch {}
+  return '';
+}
+
+function extractComboboxOptionsAndValue(el, root) {
+  const options = [];
+  let currentValue = '';
+
+  // 1. Linked listbox via aria-controls / aria-owns
+  const controlsId = el.getAttribute('aria-controls') || el.getAttribute('aria-owns');
+  let listbox = controlsId ? (root.getElementById ? root.getElementById(controlsId) : document.getElementById(controlsId)) : null;
+
+  // 2. Look for react-select, emotion-styled, or adjacent dropdown container
+  const container =
+    el.closest('[data-testid*="select"], [class*="select-shell"], [class*="select__container"]') ||
+    el.closest('.form-group, .field, [class*="-container"], [role="combobox"]') ||
+    el.parentElement;
+  if (!listbox && container) {
+    listbox = container.querySelector('[role="listbox"], .select__menu, ul');
+  }
+
+  // 2b. Also check portaled menus on document.body (many libs render there)
+  if (!listbox) {
+    listbox = document.querySelector('[role="listbox"], .select__menu, [class*="menu-list"]');
+  }
+
+  // If listbox found, harvest options
+  if (listbox) {
+    const optEls = listbox.querySelectorAll('[role="option"], li, .select__option');
+    for (const opt of optEls) {
+      const text = opt.textContent?.trim();
+      const val = opt.getAttribute('data-value') || opt.getAttribute('value') || text;
+      if (text && !/select|choose|\.\.\./i.test(text)) {
+        options.push({ value: val, label: text });
+      }
+    }
+  }
+
+  // 3. Look for hidden backing select element
+  if (container) {
+    const hiddenSelect = container.querySelector('select');
+    if (hiddenSelect && hiddenSelect.options.length > 0) {
+      for (const opt of hiddenSelect.options) {
+        if (opt.value && !/select|choose|--/i.test(opt.text)) {
+          options.push({ value: opt.value, label: opt.text.trim() });
+        }
+      }
+    }
+  }
+
+  // 4. Current value resolution
+  if (container) {
+    const singleValueEl = container.querySelector('.select__single-value, [class*="singleValue"]');
+    if (singleValueEl && singleValueEl.textContent.trim()) {
+      currentValue = singleValueEl.textContent.trim();
+    }
+  }
+
+  if (!currentValue) {
+    const ariaVal = el.getAttribute('aria-valuetext') || el.value || '';
+    const rawVal = ariaVal.trim();
+    if (rawVal && !/select|choose|\.\.\./i.test(rawVal)) {
+      currentValue = rawVal;
+    }
+  }
+
+  return { options, currentValue };
+}
+
 export function scanFormFields(root = document) {
   fieldCounter = 0;
   const detectedFields = [];
@@ -97,6 +172,8 @@ export function scanFormFields(root = document) {
 
       detectedFields.push({
         id: el.name || el.id || `jc_field_${++fieldCounter}`,
+        name: el.name || '',
+        selector: buildFieldSelector(el),
         type: FIELD_TYPES.RADIO,
         element: el,
         elements: radioEls,
@@ -119,6 +196,8 @@ export function scanFormFields(root = document) {
 
       detectedFields.push({
         id: el.id || el.name || `jc_field_${++fieldCounter}`,
+        name: el.name || '',
+        selector: buildFieldSelector(el),
         type: FIELD_TYPES.CHECKBOX,
         element: el,
         label,
@@ -153,6 +232,8 @@ export function scanFormFields(root = document) {
 
       detectedFields.push({
         id: el.id || el.name || `jc_field_${++fieldCounter}`,
+        name: el.name || '',
+        selector: buildFieldSelector(el),
         type: FIELD_TYPES.SELECT,
         element: el,
         label,
@@ -174,6 +255,8 @@ export function scanFormFields(root = document) {
 
       detectedFields.push({
         id: el.id || el.name || `jc_field_${++fieldCounter}`,
+        name: el.name || '',
+        selector: buildFieldSelector(el),
         type: FIELD_TYPES.TEXTAREA,
         element: el,
         label,
@@ -195,6 +278,8 @@ export function scanFormFields(root = document) {
 
       detectedFields.push({
         id: el.id || `jc_field_${++fieldCounter}`,
+        name: '',
+        selector: buildFieldSelector(el),
         type: FIELD_TYPES.CONTENTEDITABLE,
         element: el,
         label,
@@ -213,18 +298,19 @@ export function scanFormFields(root = document) {
       processedElements.add(el);
       const label = extractLabel(el);
       const description = extractDescription(el);
-      const rawVal = el.value || el.textContent || '';
-      const isPlaceholder = /select|choose|\.\.\./i.test(rawVal);
+      const { options, currentValue } = extractComboboxOptionsAndValue(el, root);
 
       detectedFields.push({
         id: el.id || el.getAttribute('name') || `jc_field_${++fieldCounter}`,
+        name: el.getAttribute('name') || '',
+        selector: buildFieldSelector(el),
         type: FIELD_TYPES.COMBOBOX,
         element: el,
         label,
         description,
         required: isRequired(el, label),
-        currentValue: isPlaceholder ? '' : rawVal.trim(),
-        options: [],
+        currentValue,
+        options,
         constraints: {},
         isNarrative: false,
       });
@@ -246,6 +332,8 @@ export function scanFormFields(root = document) {
 
     detectedFields.push({
       id: el.id || el.name || `jc_field_${++fieldCounter}`,
+      name: el.name || '',
+      selector: buildFieldSelector(el),
       type: fieldType,
       element: el,
       label,

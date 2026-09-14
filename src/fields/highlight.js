@@ -4,50 +4,62 @@ let inlineRewriteEl = null;
 let currentFocusedNarrativeField = null;
 
 export function scrollToField(element) {
-  if (!element || !(element instanceof HTMLElement)) return;
   try {
+    if (!element || !element.isConnected) return;
     element.scrollIntoView({
       behavior: 'smooth',
       block: 'center',
       inline: 'nearest',
     });
   } catch {
-    element.scrollIntoView(true);
+    try {
+      element?.scrollIntoView?.(true);
+    } catch {}
   }
 }
 
 export function highlightActiveField(element) {
-  if (!element || !(element instanceof HTMLElement)) return;
-  element.style.transition = 'box-shadow 0.2s ease, outline 0.2s ease';
-  element.style.outline = '2px solid #38bdf8';
-  element.style.outlineOffset = '2px';
+  try {
+    if (!element || !element.isConnected) return;
+    element.style.transition = 'box-shadow 0.2s ease, outline 0.2s ease';
+    element.style.outline = '2px solid #38bdf8';
+    element.style.outlineOffset = '2px';
+  } catch {}
 }
 
 export function highlightVerifiedField(element) {
-  if (!element || !(element instanceof HTMLElement)) return;
-  element.style.outline = '2px solid #10b981';
-  element.style.outlineOffset = '2px';
+  try {
+    if (!element || !element.isConnected) return;
+    element.style.outline = '2px solid #10b981';
+    element.style.outlineOffset = '2px';
 
-  setTimeout(() => {
-    try {
-      element.style.outline = '';
-      element.style.outlineOffset = '';
-    } catch {}
-  }, 2000);
+    setTimeout(() => {
+      try {
+        if (element && element.isConnected) {
+          element.style.outline = '';
+          element.style.outlineOffset = '';
+        }
+      } catch {}
+    }, 2000);
+  } catch {}
 }
 
 export function highlightFailedField(element) {
-  if (!element || !(element instanceof HTMLElement)) return;
-  element.style.outline = '2px solid #ef4444';
-  element.style.outlineOffset = '2px';
+  try {
+    if (!element || !element.isConnected) return;
+    element.style.outline = '2px solid #ef4444';
+    element.style.outlineOffset = '2px';
+  } catch {}
 }
 
 export function clearHighlights(elements = []) {
   for (const el of elements) {
-    if (el && el instanceof HTMLElement) {
-      el.style.outline = '';
-      el.style.outlineOffset = '';
-    }
+    try {
+      if (el && el.isConnected) {
+        el.style.outline = '';
+        el.style.outlineOffset = '';
+      }
+    } catch {}
   }
 }
 

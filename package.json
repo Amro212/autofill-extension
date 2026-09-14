@@ -1,12 +1,15 @@
 {
   "name": "job-copilot",
-  "version": "0.2.0",
+  "version": "0.2.4",
   "description": "Job Copilot — Tampermonkey userscript for AI job applications",
   "main": "dist/job-copilot.user.js",
   "type": "module",
   "scripts": {
     "build": "node build.js",
-    "dev": "node build.js --watch"
+    "dev": "node build.js --watch",
+    "bump:patch": "node build.js --bump=patch",
+    "bump:minor": "node build.js --bump=minor",
+    "bump:major": "node build.js --bump=major"
   },
   "keywords": [
     "tampermonkey",

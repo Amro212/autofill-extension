@@ -9,6 +9,20 @@ function isInsideCopilot(node) {
   return Boolean(node.closest(`#${UI_IDS.CONTAINER}`) || node.closest(`#${UI_IDS.INLINE_REWRITE}`));
 }
 
+let isPaused = false;
+
+export function pauseFormObserver() {
+  isPaused = true;
+  if (debounceTimeout) {
+    clearTimeout(debounceTimeout);
+    debounceTimeout = null;
+  }
+}
+
+export function resumeFormObserver() {
+  isPaused = false;
+}
+
 export function startFormObserver(callback) {
   onFormChangeCallback = callback;
 
@@ -17,6 +31,8 @@ export function startFormObserver(callback) {
   }
 
   mutationObserver = new MutationObserver((mutations) => {
+    if (isPaused) return;
+
     let hasRelevantMutation = false;
 
     for (const m of mutations) {
@@ -61,3 +77,4 @@ export function stopFormObserver() {
     debounceTimeout = null;
   }
 }
+

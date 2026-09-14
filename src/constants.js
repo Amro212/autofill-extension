@@ -1,4 +1,5 @@
-export const APP_VERSION = '0.2.0';
+// Dynamically injected at build time, fallback to package.json version
+export const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.2.1';
 export const APP_NAME = 'Job Copilot';
 
 export const STORAGE_KEYS = {
