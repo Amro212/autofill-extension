@@ -1,0 +1,136 @@
+// Shared ownership and committed-state rules for scanning, harvesting and filling.
+const COMBO = '[role="combobox"], button[aria-haspopup="listbox"]';
+const MENU = '[role="listbox"], .select__menu, [class*="menu-list"]';
+const OPTION = '[role="option"], .select__option';
+const VALUE = '.select__single-value, [class*="singleValue"], [class*="single-value"], .select__multi-value__label, [class*="multiValueLabel"], [class*="multi-value__label"]';
+const countryLabelsByInput = new WeakMap();
+
+function countryDisplayKey(node) {
+  const flag = node.querySelector('.iti__flag');
+  const countryClass = flag && Array.from(flag.classList).find(name => /^iti__[a-z]{2}$/.test(name));
+  const dialCode = node.textContent.trim().match(/\+\d[\d -]*$/)?.[0];
+  return countryClass && dialCode ? `${countryClass}:${dialCode.replace(/\s/g, '')}` : null;
+}
+
+export const optionKey = value => String(value ?? '').normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
+export const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+export function resolveComboboxParts(element) {
+  let container = element;
+  // Walk past an input carrying role=combobox, but never cross into another field.
+  for (let parent = element.parentElement; parent && !parent.matches('body, html, form, main'); parent = parent.parentElement) {
+    const others = Array.from(parent.querySelectorAll(`${COMBO}, input:not([type="hidden"]), textarea`))
+      .filter(node => node !== element && !element.contains(node) && !node.contains(element));
+    if (others.length) break;
+    container = parent;
+    if (parent.matches('.field, .form-group, [class*="select-shell"], .select__container')) break;
+  }
+  const input = element.matches('input') ? element : container.querySelector('input:not([type="hidden"])');
+  const controlBox = container.querySelector('.select__control, [class*="-control"], [class*="combobox-input"]') || element;
+  const toggleBtn = container.querySelector('button[aria-label*="toggle" i], button[aria-label*="open" i], [class*="dropdown-indicator"], [class*="indicatorContainer"], [class*="dropdown-arrow"]');
+  return { container, input, controlBox, toggleBtn };
+}
+
+export function getComboboxMenus(element) {
+  const { container, input } = resolveComboboxParts(element);
+  const ids = new Set([element, input].filter(Boolean).flatMap(node =>
+    `${node.getAttribute('aria-controls') || ''} ${node.getAttribute('aria-owns') || ''}`.trim().split(/\s+/).filter(Boolean)));
+  const root = element.getRootNode();
+  // An explicit but absent/empty menu is authoritative. Never borrow another menu.
+  if (ids.size) return [...ids].map(id => root.getElementById?.(id) || element.ownerDocument.getElementById(id)).filter(Boolean);
+  return Array.from(container.querySelectorAll(MENU));
+}
+
+export function discoverComboboxOptions(element) {
+  const options = [...new Set(getComboboxMenus(element).flatMap(menu => {
+    if (menu.hidden || menu.getAttribute('aria-hidden') === 'true' || menu.style.display === 'none') return [];
+    return Array.from(menu.querySelectorAll(OPTION)).filter(option =>
+      option.textContent?.trim() && !option.hidden && option.style.display !== 'none' &&
+      option.ownerDocument.defaultView.getComputedStyle(option).visibility !== 'hidden' &&
+      !option.hasAttribute('disabled') && option.getAttribute('aria-disabled') !== 'true');
+  }))];
+  const input = resolveComboboxParts(element).input || element;
+  const labels = countryLabelsByInput.get(input) || new Map();
+  for (const option of options) {
+    const key = countryDisplayKey(option);
+    if (key) labels.set(key, option.textContent.trim());
+  }
+  countryLabelsByInput.set(input, labels);
+  return options;
+}
+
+export function optionData(option) {
+  const label = option.textContent.trim();
+  return { value: option.getAttribute('data-value') || option.getAttribute('value') || label, label };
+}
+
+export function findExactOption(options, target) {
+  const key = optionKey(target);
+  if (!key) return null;
+  const matches = options.filter(option => optionKey(option.label) === key || optionKey(option.value) === key);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+export function readComboboxSelection(element) {
+  const { container, input } = resolveComboboxParts(element);
+  const labels = countryLabelsByInput.get(input || element);
+  // Greenhouse renders the selected phone country as a flag plus dial code only.
+  // Resolve that exact pair using labels observed in this field's own menu.
+  const values = Array.from(container.querySelectorAll(VALUE))
+    .map(node => labels?.get(countryDisplayKey(node)) || node.textContent.trim()).filter(Boolean);
+  if (values.length) return values;
+  const ariaValue = element.getAttribute('aria-valuetext');
+  if (ariaValue?.trim()) return [ariaValue.trim()];
+  const backingSelect = container.querySelector('select');
+  if (backingSelect) return Array.from(backingSelect.selectedOptions).filter(option => option.value).map(option => option.text.trim() || option.value);
+  return discoverComboboxOptions(element).filter(option => option.getAttribute('aria-selected') === 'true').map(option => optionData(option).label);
+  // A searchable input's value is query text, never evidence of a selection.
+}
+
+export function setComboboxSearch(input, value) {
+  if (!input || input.value === value) return;
+  const setter = Object.getOwnPropertyDescriptor(input.ownerDocument.defaultView.HTMLInputElement.prototype, 'value')?.set;
+  if (setter) setter.call(input, value);
+  else input.value = value;
+  input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+  input.dispatchEvent(new KeyboardEvent('keyup', { key: value ? value.slice(-1) : 'Backspace', bubbles: true, composed: true }));
+}
+
+export function closeCombobox(element) {
+  const { input } = resolveComboboxParts(element);
+  const target = input || element;
+  target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true }));
+  target.blur?.();
+}
+
+export async function openCombobox(element) {
+  if (element.getAttribute('aria-expanded') === 'true' && getComboboxMenus(element).length) return;
+  const active = element.ownerDocument.activeElement;
+  if (active && active !== element && active !== element.ownerDocument.body) {
+    active.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+    active.blur?.();
+  }
+  const { input, controlBox, toggleBtn } = resolveComboboxParts(element);
+  const target = input || controlBox;
+  target.focus?.();
+  target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
+  target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0 }));
+  target.click?.();
+  await delay(80);
+  if (!getComboboxMenus(element).length && toggleBtn) toggleBtn.click();
+}
+
+export async function waitForComboboxOptions(element, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  // Allow React to apply the query before inspecting the previously rendered list.
+  await delay(150);
+  do {
+    const menus = getComboboxMenus(element);
+    const loading = menus.some(menu => menu.getAttribute('aria-busy') === 'true' || /\bloading\b/i.test(menu.textContent));
+    const options = discoverComboboxOptions(element);
+    if (!loading && options.length) return options;
+    // Async menus can briefly display "No options" before the debounce starts.
+    await delay(100);
+  } while (Date.now() < deadline);
+  return [];
+}

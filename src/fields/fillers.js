@@ -1,6 +1,7 @@
 import { FIELD_TYPES } from '../constants.js';
 import { extractOptionLabel } from './labels.js';
 import { logger } from '../debug.js';
+import { optionKey, findExactOption, optionData, resolveComboboxParts, readComboboxSelection, openCombobox, closeCombobox, setComboboxSearch, waitForComboboxOptions, delay } from './combobox.js';
 
 function setNativeInputValue(element, value) {
   try {
@@ -235,410 +236,48 @@ export function fillCheckbox(element, targetValue) {
   return true;
 }
 
-// --- Combobox helpers ---
-
-const COUNTRY_SYNONYMS = {
-  'us': ['united states', 'united states of america', 'usa', 'u.s.', 'u.s.a.'],
-  'usa': ['united states', 'united states of america', 'us', 'u.s.', 'u.s.a.'],
-  'united states': ['united states of america', 'usa', 'us', 'u.s.', 'u.s.a.'],
-  'united states of america': ['united states', 'usa', 'us', 'u.s.', 'u.s.a.'],
-  'uk': ['united kingdom', 'great britain', 'england'],
-  'united kingdom': ['uk', 'great britain', 'england'],
-  'great britain': ['uk', 'united kingdom', 'england'],
-  'ca': ['canada'],
-  'canada': ['ca'],
-  'uae': ['united arab emirates'],
-  'united arab emirates': ['uae'],
-};
-
-function resolveComboboxParts(element) {
-  // Find the outermost container — walk up through common wrapper patterns
-  const container =
-    element.closest('[data-testid*="select"], [class*="select-shell"], [class*="select__container"]') ||
-    element.closest('.form-group, .field, [class*="-container"], [role="combobox"]') ||
-    element.parentElement?.closest('.form-group, .field, [class*="-container"]') ||
-    element.parentElement ||
-    element;
-
-  // The searchable text input
-  const input = (element instanceof HTMLInputElement)
-    ? element
-    : container.querySelector('input:not([type="hidden"])') || element.querySelector?.('input:not([type="hidden"])');
-
-  // Toggle / indicator button
-  const toggleBtn =
-    container.querySelector('button[aria-label*="toggle" i], button[aria-label*="open" i], .select__indicators button, [class*="indicator"], [class*="arrow"], [class*="dropdown-arrow"]') ||
-    container.querySelector('button');
-
-  // The interactive control box (react-select uses .select__control)
-  const controlBox =
-    container.querySelector('.select__control, [class*="control"], [class*="combobox-input"]') ||
-    element;
-
-  return { container, input, toggleBtn, controlBox };
-}
-
-function dispatchPointerAndMouse(el, type, opts = {}) {
-  const base = { bubbles: true, cancelable: true, composed: true, ...opts };
-  try { el.dispatchEvent(new PointerEvent('pointer' + type, base)); } catch {}
-  try { el.dispatchEvent(new MouseEvent('mouse' + type, base)); } catch {}
-}
-
-function clickOption(opt) {
-  try { opt.scrollIntoView?.({ block: 'nearest' }); } catch {}
-
-  // Full pointer + mouse sequence that works across React, MUI, Radix, Downshift, Headless UI
-  dispatchPointerAndMouse(opt, 'over');
-  dispatchPointerAndMouse(opt, 'enter');
-  dispatchPointerAndMouse(opt, 'move');
-  dispatchPointerAndMouse(opt, 'down');
-  try { opt.click(); } catch {}
-  dispatchPointerAndMouse(opt, 'up');
-}
-
-function discoverOptions(container, element) {
-  // 1. Use aria-controls/aria-owns to find the CORRECT linked listbox (most reliable for portaled menus)
-  const ariaSource = element || container.querySelector('[aria-controls], [aria-owns]');
-  if (ariaSource) {
-    const controlsId = ariaSource.getAttribute?.('aria-controls') || ariaSource.getAttribute?.('aria-owns');
-    if (controlsId) {
-      const linked = document.getElementById(controlsId);
-      if (linked) {
-        const options = Array.from(linked.querySelectorAll('[role="option"], li, .select__option')).filter(el => {
-          const text = (el.textContent || '').trim();
-          return text.length > 0 && text.length < 200;
-        });
-        if (options.length > 0) return options;
-      }
-    }
-  }
-
-  // 2. Try inside the container (non-portaled dropdowns)
-  const menu = container.querySelector('[role="listbox"], .select__menu, [class*="menu-list"], ul[role="listbox"]');
-  if (menu) {
-    const options = Array.from(menu.querySelectorAll('[role="option"], li, .select__option, div[id*="option"]')).filter(el => {
-      const text = (el.textContent || '').trim();
-      return text.length > 0 && text.length < 200;
-    });
-    if (options.length > 0) return options;
-  }
-
-  // 3. Fallback — search for portaled menus on document, but ONLY if there is exactly ONE open menu
-  //    (if there are multiple, we can't know which one belongs to this field)
-  const allMenus = document.querySelectorAll('[role="listbox"], .select__menu, [class*="menu-list"]');
-  if (allMenus.length === 1) {
-    const options = Array.from(allMenus[0].querySelectorAll('[role="option"], li, .select__option')).filter(el => {
-      const text = (el.textContent || '').trim();
-      return text.length > 0 && text.length < 200;
-    });
-    if (options.length > 0) return options;
-  }
-
-  return [];
-}
-
-function scoreMatch(optText, optVal, targetLower) {
-  // Returns a score — higher is better. 0 = no match.
-  if (optText === targetLower || optVal === targetLower) return 100; // exact
-  if (optText.startsWith(targetLower)) return 80; // target is prefix of option
-  if (targetLower.startsWith(optText) && optText.length > 2) return 70; // option is prefix of target
-
-  // Synonym expansion (countries, etc.)
-  const synonyms = COUNTRY_SYNONYMS[targetLower];
-  if (synonyms) {
-    for (const syn of synonyms) {
-      if (optText === syn) return 95;
-      if (optText.startsWith(syn)) return 75;
-    }
-  }
-
-  if (optText.includes(targetLower)) return 50; // substring
-  if (targetLower.includes(optText) && optText.length > 3) return 40; // reverse substring
-
-  return 0;
-}
-
-function findBestOption(options, targetLower) {
-  let bestOpt = null;
-  let bestScore = 0;
-
-  for (const opt of options) {
-    const optText = (opt.textContent || '').trim().toLowerCase();
-    const optVal = (opt.getAttribute('data-value') || opt.getAttribute('value') || '').trim().toLowerCase();
-
-    const score = scoreMatch(optText, optVal, targetLower);
-    if (score > bestScore) {
-      bestScore = score;
-      bestOpt = opt;
-      if (score === 100) break; // can't beat exact
-    }
-  }
-
-  return bestOpt;
-}
-
-async function dismissOpenDropdowns() {
-  // Close any currently open dropdowns before opening a new one
-  // This prevents cross-contamination between combobox fields
-  try {
-    // Press Escape to close any open menu
-    document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true
-    }));
-  } catch {}
-
-  // Click document body to dismiss portaled dropdowns
-  try {
-    document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-    document.body.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-  } catch {}
-
-  // Wait for dropdown to close
-  await new Promise(r => setTimeout(r, 100));
-
-  // Blur any focused element
-  try {
-    if (document.activeElement && document.activeElement !== document.body) {
-      document.activeElement.blur();
-    }
-  } catch {}
-
-  await new Promise(r => setTimeout(r, 50));
-}
-
-async function openDropdown(input, controlBox, toggleBtn) {
-  // Strategy 1: Click the control box (works for react-select, MUI)
-  if (controlBox && controlBox !== input) {
-    dispatchPointerAndMouse(controlBox, 'down');
-    try { controlBox.click(); } catch {}
-  }
-
-  // Strategy 2: Focus + mousedown on input (works for searchable combos)
-  if (input) {
-    try { input.focus(); } catch {}
-    dispatchPointerAndMouse(input, 'down');
-    try { input.click(); } catch {}
-  }
-
-  // Brief wait for dropdown to start rendering
-  await new Promise(r => setTimeout(r, 80));
-
-  // Strategy 3: If no listbox appeared yet, try the toggle button
-  const hasMenu = document.querySelector('[role="listbox"], .select__menu, [class*="menu-list"]');
-  if (!hasMenu && toggleBtn && toggleBtn !== controlBox) {
-    try { toggleBtn.click(); } catch {}
-    await new Promise(r => setTimeout(r, 80));
-  }
-}
-
-async function typeSearchText(input, searchText) {
-  if (!input) return;
-
-  // Clear existing text first
-  setNativeInputValue(input, '');
-  try {
-    input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true, composed: true }));
-  } catch {}
-
-  await new Promise(r => setTimeout(r, 30));
-
-  // Type the search text
-  setNativeInputValue(input, searchText);
-  try {
-    input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true, composed: true }));
-    input.dispatchEvent(new Event('change', { bubbles: true, cancelable: true, composed: true }));
-    // Also fire keydown for frameworks that listen to key events for filtering
-    for (const ch of searchText.slice(0, 3)) {
-      input.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true, composed: true }));
-      input.dispatchEvent(new KeyboardEvent('keyup', { key: ch, bubbles: true, composed: true }));
-    }
-  } catch {}
-}
-
-function checkSelectionStuck(container) {
-  // Check if the combobox now shows a selected value — scoped to THIS container only
-  const singleVal = container.querySelector('.select__single-value, [class*="singleValue"], [class*="single-value"]');
-  if (singleVal) {
-    const text = (singleVal.textContent || '').trim().toLowerCase();
-    if (text && !/select|choose|\.\.\./i.test(text)) return true;
-  }
-
-  // Check aria-selected WITHIN this container's linked listbox only
-  const ariaControls = container.querySelector('[aria-controls]')?.getAttribute('aria-controls');
-  if (ariaControls) {
-    const linked = document.getElementById(ariaControls);
-    if (linked) {
-      const selectedOpt = linked.querySelector('[role="option"][aria-selected="true"]');
-      if (selectedOpt) return true;
-    }
-  }
-  // Also check inside the container itself
-  const selectedInContainer = container.querySelector('[role="option"][aria-selected="true"]');
-  if (selectedInContainer) return true;
-
-  // Check hidden select
-  const hiddenSelect = container.querySelector('select');
-  if (hiddenSelect && hiddenSelect.selectedIndex >= 0) {
-    const opt = hiddenSelect.options[hiddenSelect.selectedIndex];
-    if (opt && opt.value && !/--|select|choose/i.test(opt.text)) return true;
-  }
-
-  return false;
-}
-
-export async function fillCombobox(element, targetValue) {
-  if (!element) return false;
-  const strVal = String(targetValue || '').trim();
-  if (!strVal) return false;
-
-  const targetLower = strVal.toLowerCase();
-  const fieldHint = element.getAttribute('aria-label') || element.id || '(combobox)';
-
-  try {
-    const { container, input, toggleBtn, controlBox } = resolveComboboxParts(element);
-    logger.info(`Fill[${fieldHint}]: target="${strVal}", hasInput=${!!input}, hasToggle=${!!toggleBtn}`);
-
-    // === Step 0: Dismiss any previously open dropdowns ===
-    await dismissOpenDropdowns();
-
-    // === Step 1: Open THIS dropdown ===
-    await openDropdown(input, controlBox, toggleBtn);
-    logger.info(`Fill[${fieldHint}]: dropdown opened`);
-
-    // === Step 2: Type search text to filter options ===
-    // Use a short prefix first (3-6 chars) — enough to narrow, not so much it over-filters
-    const searchPrefix = strVal.length > 6 ? strVal.slice(0, 6) : strVal;
-    if (input) {
-      await typeSearchText(input, searchPrefix);
-      logger.info(`Fill[${fieldHint}]: typed search prefix "${searchPrefix}"`);
-    }
-
-    // Wait for framework to filter/render options — poll with retries for async loaders
-    let options = [];
-    for (let attempt = 0; attempt < 3; attempt++) {
-      await new Promise(r => setTimeout(r, attempt === 0 ? 200 : 400));
-      options = discoverOptions(container, element);
-      if (options.length > 0) break;
-      logger.info(`Fill[${fieldHint}]: no options yet after ${(attempt + 1) * (attempt === 0 ? 200 : 400)}ms, retrying...`);
-    }
-
-    logger.info(`Fill[${fieldHint}]: discovered ${options.length} options after prefix search`);
-
-    // If no options found with prefix, retry with full text
-    if (options.length === 0 && input && searchPrefix !== strVal) {
-      await typeSearchText(input, strVal);
-      await new Promise(r => setTimeout(r, 300));
-      options = discoverOptions(container, element);
-      logger.info(`Fill[${fieldHint}]: retried with full text, found ${options.length} options`);
-    }
-
-    // If still no options, try re-opening (some frameworks close on input clear)
-    if (options.length === 0) {
-      await openDropdown(input, controlBox, toggleBtn);
-      await new Promise(r => setTimeout(r, 200));
-      options = discoverOptions(container, element);
-      logger.info(`Fill[${fieldHint}]: re-opened dropdown, found ${options.length} options`);
-    }
-
-    // === Step 4: Find the best matching option ===
-    let matchedOpt = findBestOption(options, targetLower);
-
-    // If no match with search-filtered options, clear input and try all options
-    if (!matchedOpt && input && options.length > 0) {
-      // The typed text may have over-filtered — try with broader text
-      setNativeInputValue(input, '');
-      try {
-        input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true, composed: true }));
-      } catch {}
-      await new Promise(r => setTimeout(r, 200));
-      const allOptions = discoverOptions(container, element);
-      logger.info(`Fill[${fieldHint}]: cleared filter, found ${allOptions.length} unfiltered options`);
-      matchedOpt = findBestOption(allOptions, targetLower);
-    }
-
-    if (matchedOpt) {
-      const matchText = (matchedOpt.textContent || '').trim();
-      logger.info(`Fill[${fieldHint}]: best match = "${matchText}"`);
-    } else {
-      logger.warn(`Fill[${fieldHint}]: no matching option found for "${strVal}" among ${options.length} options`);
-      if (options.length > 0) {
-        const sample = options.slice(0, 3).map(o => (o.textContent || '').trim()).join(', ');
-        logger.warn(`Fill[${fieldHint}]: sample options: ${sample}...`);
-      }
-    }
-
-    // === Step 5: Click the matched option ===
-    let didSelect = false;
-
-    if (matchedOpt) {
-      clickOption(matchedOpt);
-
-      // Wait for framework state to settle
-      await new Promise(r => setTimeout(r, 150));
-
-      // Verify the click actually registered
-      didSelect = checkSelectionStuck(container);
-      if (!didSelect) {
-        // Retry click once more
-        logger.info(`Fill[${fieldHint}]: first click didn't stick, retrying...`);
-        clickOption(matchedOpt);
-        await new Promise(r => setTimeout(r, 100));
-        didSelect = checkSelectionStuck(container);
-      }
-    } else if (input) {
-      // === Fallback: No matching option found ===
-      // Type full value and try Enter key
-      await typeSearchText(input, strVal);
-      await new Promise(r => setTimeout(r, 150));
-
-      // Check if typing revealed a matching option we can click
-      const lastChanceOptions = discoverOptions(container, element);
-      const lastChanceMatch = findBestOption(lastChanceOptions, targetLower);
-      if (lastChanceMatch) {
-        logger.info(`Fill[${fieldHint}]: last-chance match found after full text type`);
-        clickOption(lastChanceMatch);
-        await new Promise(r => setTimeout(r, 100));
-        didSelect = checkSelectionStuck(container);
-      } else {
-        // Absolute last resort — Enter key to commit typed text
-        logger.info(`Fill[${fieldHint}]: no options found, pressing Enter as last resort`);
-        try {
-          input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
-          input.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
-          input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
-        } catch {}
-        await new Promise(r => setTimeout(r, 100));
-        didSelect = checkSelectionStuck(container);
-      }
-    }
-
-    logger.info(`Fill[${fieldHint}]: result = ${didSelect ? 'SUCCESS' : 'FAILED'}`);
-
-    // === Step 6: Update backing hidden <select> if present ===
-    if (didSelect) {
-      const hiddenSelect = container.querySelector('select');
-      if (hiddenSelect) {
-        fillSelect(hiddenSelect, strVal);
-      }
-    }
-
-    // === Step 7: Close / blur cleanly ===
-    if (input) {
-      try {
-        input.dispatchEvent(new Event('blur', { bubbles: true }));
-      } catch {}
-    }
-    try {
-      element.dispatchEvent(new Event('blur', { bubbles: true }));
-    } catch {}
-
-    // Final settle wait
-    await new Promise(r => setTimeout(r, 100));
-
-    return didSelect;
-  } catch (err) {
-    logger.error(`Fill[${fieldHint}]: fillCombobox error: ${err.message}`);
+export async function fillCombobox(element, targetValue, knownOptions) {
+  if (!element || !optionKey(targetValue)) return false;
+  const known = knownOptions ? findExactOption(knownOptions, targetValue) : null;
+  if (knownOptions && !known) {
+    logger.warn(`Fill[${element.id}]: rejected answer outside this field's options`);
     return false;
+  }
+  const target = known?.label || String(targetValue);
+  const { input } = resolveComboboxParts(element);
+  try {
+    if (readComboboxSelection(element).some(value => optionKey(value) === optionKey(target))) return true;
+    await openCombobox(element);
+    setComboboxSearch(input, '');
+    let options = await waitForComboboxOptions(element);
+    let match = findExactOption(options.map(option => ({ ...optionData(option), element: option })), target);
+    // Search only for an option already harvested from this field (async/virtual menus).
+    if (!match && known && input) {
+      setComboboxSearch(input, known.label);
+      options = await waitForComboboxOptions(element);
+      match = findExactOption(options.map(option => ({ ...optionData(option), element: option })), target);
+    }
+    if (!match) {
+      logger.warn(`Fill[${element.id}]: no exact owned option for "${target}"`);
+      return false;
+    }
+    logger.info(`Fill[${element.id}]: selecting exact option "${match.label}"`);
+    match.element.scrollIntoView?.({ block: 'nearest' });
+    match.element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
+    match.element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0 }));
+    match.element.click();
+    for (let attempt = 0; attempt < 10; attempt++) {
+      if (readComboboxSelection(element).some(value => optionKey(value) === optionKey(target))) return true;
+      await delay(100);
+    }
+    return false;
+  } catch (err) {
+    logger.warn(`Fill[${element.id}]: ${err.message}`);
+    return false;
+  } finally {
+    // Clear search residue without changing committed values or multi-select chips.
+    setComboboxSearch(input, '');
+    closeCombobox(element);
   }
 }
 
@@ -671,7 +310,7 @@ export async function fillField(field, targetValue) {
       return fillCheckbox(field.element, targetValue);
 
     case FIELD_TYPES.COMBOBOX:
-      return await fillCombobox(field.element, targetValue);
+      return await fillCombobox(field.element, targetValue, field.options || []);
 
     case FIELD_TYPES.CONTENTEDITABLE:
       return fillContentEditable(field.element, targetValue);

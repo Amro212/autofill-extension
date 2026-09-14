@@ -1,22 +1,28 @@
 import { getApiKey, getSettings, getProfile } from './storage.js';
 import { logger } from './debug.js';
+import { findExactOption } from './fields/combobox.js';
 
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
+const AUTOFILL_TIMEOUT_MS = 120000;
 
 function sendGMRequest(options) {
+  const timeoutError = () => new Error(`OpenRouter request timed out after ${options.timeout / 1000}s. Try again or choose a faster model.`);
   return new Promise((resolve, reject) => {
     if (typeof GM_xmlhttpRequest === 'function') {
       GM_xmlhttpRequest({
         ...options,
         onload: (response) => resolve(response),
         onerror: (err) => reject(err),
-        ontimeout: () => reject(new Error('Request timed out')),
+        ontimeout: () => reject(timeoutError()),
       });
     } else {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(timeoutError()), options.timeout);
       fetch(options.url, {
         method: options.method,
         headers: options.headers,
         body: options.data,
+        signal: controller.signal,
       })
         .then(async (res) => {
           const text = await res.text();
@@ -26,7 +32,8 @@ function sendGMRequest(options) {
             responseHeaders: '',
           });
         })
-        .catch(reject);
+        .catch(reject)
+        .finally(() => clearTimeout(timer));
     }
   });
 }
@@ -147,7 +154,7 @@ export async function testConnection() {
 /**
  * Executes a single primary AI request to fill all detected form fields on the page
  */
-export async function generateAutofillAnswers(normalizedFields) {
+export async function generateAutofillAnswers(normalizedFields, { allowSearch = true } = {}) {
   const apiKey = getApiKey();
   const settings = getSettings();
   const profile = getProfile();
@@ -172,8 +179,12 @@ CRITICAL OPERATING RULES:
 4. For narrative / open-ended questions (e.g. "Why do you want to work here?", "Describe your experience with X"):
    - Write a polished, professional, compelling first-person answer using real facts and achievements from the resume context.
    - Respect character limits if specified.
-5. For "select", "radio", or "checkbox" fields:
+5. For "select", "combobox", "radio", or "checkbox" fields:
    - Your "value" MUST be chosen strictly from the provided "options" list (matching either the option value or option label). Never leave a select on a placeholder like "-- Please Select --" or "Select...".
+   - Options belong ONLY to their own fieldId. Never reuse a choice from another field.
+   - For comboboxes, return the exact option label. If no options were discovered, or the candidate context does not support any available option, return an empty string. Never invent a label or choose the first/closest option just to fill the field.
+   - Match the specific question against applicant context (phone dialing country, work location, nationality, degree and discipline are separate questions).
+   - ${allowSearch ? 'Some comboboxes load only the first page of options. If the candidate\'s known answer is missing, leave value empty and include an optional "searchQuery" with a short search term grounded in the applicant context (e.g. the actual university name). A search query is NOT a selection. Omit it when the answer is unknown.' : 'These options are final search results. Do not request another search; leave value empty if there is no supported choice.'}
 6. Return an answer object for EVERY field provided in "fieldsToFill".
 7. Respond ONLY with a valid JSON object in this exact schema, without markdown code blocks:
 {
@@ -181,7 +192,7 @@ CRITICAL OPERATING RULES:
     {
       "fieldId": "string (must match fieldId from input)",
       "value": "string or boolean",
-      "inferred": boolean
+      "inferred": boolean${allowSearch ? ',\n      "searchQuery": "optional; only for an empty value requiring option discovery"' : ''}
     }
   ]
 }`;
@@ -203,7 +214,7 @@ CRITICAL OPERATING RULES:
       host: window.location.hostname,
     },
     fieldsToFill: normalizedFields,
-  }, null, 2);
+  });
 
   logger.info(`Sending unified autofill AI request for ${normalizedFields.length} fields using ${model}`);
   const startTime = Date.now();
@@ -217,6 +228,7 @@ CRITICAL OPERATING RULES:
     response_format: { type: 'json_object' },
     temperature: 0.2,
   });
+  logger.info(`AI request: ${payload.length} characters, timeout ${AUTOFILL_TIMEOUT_MS / 1000}s`);
 
   const response = await sendGMRequest({
     method: 'POST',
@@ -228,7 +240,10 @@ CRITICAL OPERATING RULES:
       'X-Title': 'Job Copilot Tampermonkey',
     },
     data: payload,
-    timeout: 35000,
+    timeout: AUTOFILL_TIMEOUT_MS,
+  }).catch(err => {
+    logger.warn(`AI request failed after ${Date.now() - startTime}ms using ${model}: ${err.message}`);
+    throw err;
   });
 
   const latencyMs = Date.now() - startTime;
@@ -263,11 +278,28 @@ CRITICAL OPERATING RULES:
     throw new Error('AI response missing "answers" array');
   }
 
-  const validFieldIds = new Set(normalizedFields.map((f) => f.fieldId));
+  const fieldsById = new Map(normalizedFields.map((f) => [f.fieldId, f]));
+  const seenIds = new Set();
   const validatedAnswers = parsed.answers.filter((ans) => {
-    if (!validFieldIds.has(ans.fieldId)) {
-      logger.warn(`AI returned answer for unrecognized field ID: "${ans.fieldId}" (omitted)`);
+    if (!ans || !fieldsById.has(ans.fieldId) || seenIds.has(ans.fieldId)) {
+      logger.warn('AI returned an unknown or duplicate field ID (omitted)');
       return false;
+    }
+    seenIds.add(ans.fieldId);
+    const field = fieldsById.get(ans.fieldId);
+    if (!allowSearch || field.type !== 'combobox' || ans.value !== '' ||
+        typeof ans.searchQuery !== 'string' || !ans.searchQuery.trim() || ans.searchQuery.length > 200) {
+      delete ans.searchQuery;
+    } else {
+      ans.searchQuery = ans.searchQuery.trim();
+    }
+    if (field.type === 'combobox' && ans.value !== '') {
+      const option = findExactOption(field.options || [], ans.value);
+      if (!option) {
+        logger.warn(`AI[${ans.fieldId}]: rejected answer outside ${field.options?.length || 0} owned options`);
+        return false;
+      }
+      ans.value = option.label;
     }
     return true;
   });

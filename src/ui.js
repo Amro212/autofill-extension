@@ -11,6 +11,7 @@ import {
 import { logger } from './debug.js';
 import { testConnection, generateAutofillAnswers, rewriteNarrativeField } from './ai.js';
 import { scanFormFields, harvestComboboxOptions } from './fields/scanner.js';
+import { resolveComboboxSearchAnswers } from './autofill.js';
 import { extractOptionLabel } from './fields/labels.js';
 import { normalizeFieldsForAI } from './fields/normalize.js';
 import { fillField } from './fields/fillers.js';
@@ -740,14 +741,19 @@ async function executeAutofillFlow() {
     autofillProgress.statusText = 'Harvesting combobox options...';
     updatePanelDOM();
 
-    // Dynamically open comboboxes that had zero options at scan time to read their rendered options
+    // Read each field's unfiltered options before asking AI to choose an exact label.
     await harvestComboboxOptions(targetFields);
 
     autofillProgress.statusText = `Generating answers with AI (${settings.model})...`;
     updatePanelDOM();
 
     const normalized = normalizeFieldsForAI(targetFields, { overwriteExisting: overwrite });
-    const aiResponse = await generateAutofillAnswers(normalized);
+    let aiResponse = await generateAutofillAnswers(normalized);
+    if (aiResponse.answers.some(answer => answer.searchQuery)) {
+      autofillProgress.statusText = 'Searching for missing combobox options...';
+      updatePanelDOM();
+      aiResponse = await resolveComboboxSearchAnswers(targetFields, aiResponse);
+    }
     const answersMap = new Map(aiResponse.answers.map((a) => [a.fieldId, a]));
 
     logger.info(`Starting progressive fill of ${targetFields.length} fields...`);
@@ -790,7 +796,7 @@ async function executeAutofillFlow() {
         // Brief delay for visual animation
         await new Promise((r) => setTimeout(r, 100));
 
-        await fillField(field, answer.value);
+        const didFill = await fillField(field, answer.value);
 
         // Allow micro-delay for React/framework state settling
         // Comboboxes need more time because the framework processes click → state update → re-render
@@ -799,7 +805,9 @@ async function executeAutofillFlow() {
 
         // Re-resolve element before verification if DOM was mutated
         field.element = resolveLiveElement(field);
-        const verification = await verifyField(field, answer.value);
+        const verification = didFill
+          ? await verifyField(field, answer.value)
+          : { verified: false, actualValue: '', error: 'No exact option was selected or the field rejected the value' };
 
         if (verification.verified) {
           highlightVerifiedField(field.element);

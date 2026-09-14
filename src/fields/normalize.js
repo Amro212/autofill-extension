@@ -27,19 +27,10 @@ export function normalizeFieldsForAI(detectedFields, options = {}) {
     }
 
     if (field.options && field.options.length > 0) {
-      const MAX_OPTIONS = 50;
-      const allOptions = field.options.map((opt) => ({
+      normalized.options = field.options.map((opt) => ({
         value: opt.value,
         label: opt.label,
       }));
-
-      if (allOptions.length > MAX_OPTIONS) {
-        normalized.options = allOptions.slice(0, MAX_OPTIONS);
-        normalized.description = (normalized.description || '') +
-          ` (showing first ${MAX_OPTIONS} of ${allOptions.length} options — pick the closest match)`;
-      } else {
-        normalized.options = allOptions;
-      }
     }
 
     if (field.constraints && Object.keys(field.constraints).length > 0) {
