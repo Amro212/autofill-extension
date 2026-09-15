@@ -35,8 +35,14 @@ export function extractLabel(element) {
     const ids = ariaLabelledBy.split(/\s+/);
     const textParts = ids
       .map((id) => document.getElementById(id))
-      .filter(Boolean)
-      .map((el) => el.textContent || '')
+      // Some button dropdowns reference both the question and themselves (or
+      // their selected-value span). Selection text is not part of the question.
+      .filter(el => el && el !== element && !element.contains(el))
+      .map((el) => {
+        const clone = el.cloneNode(true);
+        clone.querySelectorAll('input,textarea,select,button,[role="combobox"],[role="listbox"]').forEach(control => control.remove());
+        return clone.textContent || '';
+      })
       .join(' ');
     if (textParts.trim()) {
       return cleanText(textParts);

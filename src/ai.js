@@ -154,7 +154,7 @@ export async function testConnection() {
 /**
  * Executes a single primary AI request to fill all detected form fields on the page
  */
-export async function generateAutofillAnswers(normalizedFields, { allowSearch = true } = {}) {
+export async function generateAutofillAnswers(normalizedFields, { allowSearch = true, jobContext = null, repairErrors = [] } = {}) {
   const apiKey = getApiKey();
   const settings = getSettings();
   const profile = getProfile();
@@ -213,6 +213,8 @@ CRITICAL OPERATING RULES:
       url: window.location.href,
       host: window.location.hostname,
     },
+    jobContext,
+    repairErrors,
     fieldsToFill: normalizedFields,
   });
 

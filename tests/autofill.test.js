@@ -237,6 +237,20 @@ test('second AI pass cannot request another search loop', async () => {
   assert.equal(response.answers[0].searchQuery, undefined);
 });
 
+test('workflow requests include job and validation context without putting the API key in the prompt', async () => {
+  saveApiKey('fixture-private-key');
+  let payload;
+  globalThis.GM_xmlhttpRequest = options => {
+    payload = JSON.parse(options.data);
+    options.onload({ status: 200, responseText: JSON.stringify({ choices: [{ message: { content: '{"answers":[]}' } }] }) });
+  };
+  await generateAutofillAnswers([], { jobContext: { title: 'Engineer', company: 'Example' }, repairErrors: [{ fieldId: 'essay', message: 'Too short' }] });
+  const content = JSON.parse(payload.messages[1].content);
+  assert.equal(content.jobContext.company, 'Example');
+  assert.equal(content.repairErrors[0].fieldId, 'essay');
+  assert.equal(JSON.stringify(payload).includes('fixture-private-key'), false);
+});
+
 test('query resolution asks AI to choose only from newly harvested options', async () => {
   const { resolveComboboxSearchAnswers } = await import('../src/autofill.js');
   saveApiKey('fixture-key');
@@ -275,4 +289,32 @@ test('selected React inputs with opacity zero remain scannable for overwrite mod
   const field = combo('degree', ["Bachelor's Degree"], { selected: "Bachelor's Degree" });
   field.input.style.opacity = '0';
   assert.equal(scanFormFields()[0]?.currentValue, "Bachelor's Degree");
+});
+
+test('dropdown cleanup does not send Escape to page navigation handlers', async () => {
+  const field = combo('country', ['Canada']);
+  const back = document.createElement('button');
+  document.body.append(back);
+  back.focus();
+  let navigationKeys = 0;
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') navigationKeys++; });
+  await openCombobox(field.input);
+  closeCombobox(field.input);
+  assert.equal(navigationKeys, 0);
+});
+
+test('button dropdown is scanned and its selected label is recognized', () => {
+  document.querySelector('main').innerHTML = '<label for="country">Country</label><button id="country" type="button" aria-haspopup="listbox" aria-expanded="false">Canada</button>';
+  const fields = scanFormFields();
+  assert.equal(fields.length, 1);
+  assert.equal(fields[0].type, 'combobox');
+  assert.equal(fields[0].currentValue, 'Canada');
+});
+
+test('opening a dropdown button never triggers native form submission', async () => {
+  document.querySelector('main').innerHTML = '<form><button id="country" aria-haspopup="listbox" aria-controls="menu">Select One</button><div id="menu" role="listbox"><div role="option">Canada</div></div></form>';
+  let submissions = 0;
+  document.querySelector('form').onsubmit = e => { e.preventDefault(); submissions++; };
+  await openCombobox(document.querySelector('#country'));
+  assert.equal(submissions, 0);
 });

@@ -1,5 +1,5 @@
 // Dynamically injected at build time, fallback to package.json version
-export const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.2.1';
+export const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.3.0';
 export const APP_NAME = 'Job Copilot';
 
 export const STORAGE_KEYS = {
@@ -8,6 +8,9 @@ export const STORAGE_KEYS = {
   SECRETS: 'jc:secrets',
   DEBUG: 'jc:debug',
   VERSION: 'jc:version',
+  JOB: 'jc:job',
+  SESSIONS: 'jc:sessions',
+  MEMORY: 'jc:memory',
 };
 
 export const DEFAULT_SETTINGS = {

@@ -70,7 +70,7 @@ export function scanFormFields(root = document) {
     [contenteditable="true"],
     [role="combobox"],
     button[aria-haspopup="listbox"]
-  `)).filter((el) => !isInsideCopilot(el));
+  `)).filter((el) => !isInsideCopilot(el) && !el.closest('header,nav,footer,[role="banner"],[role="navigation"],[role="contentinfo"],.g-recaptcha,.h-captcha,[data-captcha]') && !/^(g-recaptcha-response|h-captcha-response|cf-turnstile-response)(?:$|-)/i.test(el.name || el.id || ''));
 
   for (const el of candidates) {
     if (processedElements.has(el)) continue;
@@ -79,7 +79,8 @@ export function scanFormFields(root = document) {
     const typeAttr = (el.getAttribute('type') || '').toLowerCase();
 
     // Skip non-fillable inputs
-    if (typeAttr === 'hidden' || typeAttr === 'submit' || typeAttr === 'button' || typeAttr === 'reset' || typeAttr === 'image' || typeAttr === 'password') {
+    const isCombobox = el.matches('[role="combobox"],button[aria-haspopup="listbox"]');
+    if (typeAttr === 'hidden' || typeAttr === 'submit' || (typeAttr === 'button' && !isCombobox) || typeAttr === 'reset' || typeAttr === 'image' || typeAttr === 'password' || typeAttr === 'file') {
       continue;
     }
 

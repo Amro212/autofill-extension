@@ -83,6 +83,10 @@ export function readComboboxSelection(element) {
   if (ariaValue?.trim()) return [ariaValue.trim()];
   const backingSelect = container.querySelector('select');
   if (backingSelect) return Array.from(backingSelect.selectedOptions).filter(option => option.value).map(option => option.text.trim() || option.value);
+  if (element.matches('button[aria-haspopup="listbox"],button[role="combobox"]')) {
+    const label = element.textContent.trim();
+    if (label && !/^(?:select(?: one| an? option)?|choose(?: one| an? option)?|--.*--)\s*$/i.test(label)) return [label];
+  }
   return discoverComboboxOptions(element).filter(option => option.getAttribute('aria-selected') === 'true').map(option => optionData(option).label);
   // A searchable input's value is query text, never evidence of a selection.
 }
@@ -99,15 +103,21 @@ export function setComboboxSearch(input, value) {
 export function closeCombobox(element) {
   const { input } = resolveComboboxParts(element);
   const target = input || element;
-  target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true }));
   target.blur?.();
+}
+
+export function clickFieldControl(element) {
+  const event = new MouseEvent('click', { bubbles: true, cancelable: true, composed: true, button: 0 });
+  // Dropdown buttons/options may omit type=button inside a form. Preserve their
+  // click listeners without allowing the browser's implicit submit default.
+  if (element.closest('button')?.type === 'submit' || element.closest('a[href]')) event.preventDefault();
+  element.dispatchEvent(event);
 }
 
 export async function openCombobox(element) {
   if (element.getAttribute('aria-expanded') === 'true' && getComboboxMenus(element).length) return;
   const active = element.ownerDocument.activeElement;
   if (active && active !== element && active !== element.ownerDocument.body) {
-    active.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
     active.blur?.();
   }
   const { input, controlBox, toggleBtn } = resolveComboboxParts(element);
@@ -115,9 +125,9 @@ export async function openCombobox(element) {
   target.focus?.();
   target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
   target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0 }));
-  target.click?.();
+  clickFieldControl(target);
   await delay(80);
-  if (!getComboboxMenus(element).length && toggleBtn) toggleBtn.click();
+  if (!getComboboxMenus(element).length && toggleBtn) clickFieldControl(toggleBtn);
 }
 
 export async function waitForComboboxOptions(element, timeoutMs = 3000) {
