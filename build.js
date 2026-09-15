@@ -84,6 +84,8 @@ function getBanner(pkg) {
 // @version      ${pkg.version}
 // @description  ${pkg.description}
 // @author       ${pkg.author}
+// @updateURL    https://raw.githubusercontent.com/Amro212/autofill-extension/main/dist/job-copilot.user.js
+// @downloadURL  https://raw.githubusercontent.com/Amro212/autofill-extension/main/dist/job-copilot.user.js
 // @match        *://*/*
 // @connect      openrouter.ai
 // @grant        GM_getValue
