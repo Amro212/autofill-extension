@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Job Copilot
 // @namespace    https://github.com/Amro212/autofill-extension
-// @version      0.3.4
+// @version      0.3.5
 // @description  Job Copilot — Tampermonkey userscript for AI job applications
 // @author       Job Copilot Team
 // @updateURL    https://raw.githubusercontent.com/Amro212/autofill-extension/main/dist/job-copilot.user.js
@@ -21,7 +21,7 @@
 
 (() => {
   // src/constants.js
-  var APP_VERSION = true ? "0.3.4" : "0.3.0";
+  var APP_VERSION = true ? "0.3.5" : "0.3.0";
   var APP_NAME = "Job Copilot";
   var STORAGE_KEYS = {
     SETTINGS: "jc:settings",
@@ -416,6 +416,21 @@
   // src/ai.js
   var OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
   var AUTOFILL_TIMEOUT_MS = 12e4;
+  var OPTION_FIELD_TYPES = /* @__PURE__ */ new Set(["select", "combobox", "radio", "checkbox"]);
+  var NARRATIVE_VOICE_RULES = `NARRATIVE VOICE (all free-text and open-ended answers):
+Write like a real candidate filling a form: first-person, specific, and natural. Professional enough for a hiring manager, never brochure or chatbot copy. Vary sentence length. Every sentence must add a fact, not emphasis.
+
+Hard bans:
+- Never use em dashes (\u2014), en dashes (\u2013), or spaced double hyphens as dashes. Use a period, comma, colon, or parentheses.
+- Do not use not-X-but-Y contrasts ("It's not just X, it's Y"). State the point.
+- No staged openers or closers ("Here's the thing", "At its core", "That's what I bring").
+- No inflated or sales wording (pivotal, crucial, testament, landscape, delve, underscore, showcase, robust, meticulous, vibrant, groundbreaking, foster, leverage, boasts, serves as, stands as). Prefer is/have and concrete verbs.
+- Do not pad ideas into forced groups of three.
+- No bold, emoji, or chatbot wrappers.`;
+  function stripModelDashes(text) {
+    if (typeof text !== "string" || !text) return text;
+    return text.replace(/\s*[\u2014\u2013]\s*/g, ", ").replace(/\s+--\s+/g, ", ");
+  }
   function sendGMRequest(options) {
     const timeoutError = () => new Error(`OpenRouter request timed out after ${options.timeout / 1e3}s. Try again or choose a faster model.`);
     return new Promise((resolve, reject) => {
@@ -554,7 +569,7 @@
     if (!apiKey) {
       throw new Error("No OpenRouter API key configured. Please set your key in Settings.");
     }
-    const systemPrompt = `You are Job Copilot, an expert AI assistant filling an online job application for a candidate.
+    const systemPrompt = `You are Job Copilot, filling an online job application for a candidate.
 
 CRITICAL OPERATING RULES:
 1. Ground all candidate claims strictly in the provided applicant profile, resume highlights, and applicant notes.
@@ -565,10 +580,11 @@ CRITICAL OPERATING RULES:
    - Years of experience dropdowns: infer the candidate's level (e.g. Senior, Mid, 5+ years) from their resume context and select the best matching option. Set "inferred": true.
    - Demographic surveys / EEOD / Disability / Veteran status: select a standard valid option (e.g. "I do not wish to answer", "No", or decline to state) from the provided options list. Set "inferred": true.
    - Consent / Privacy / Background check agreement checkboxes: set value to true.
-   - General, custom, or simulation text fields: provide a concise, relevant response based on the candidate's software background or profile.
+   - General, custom, or simulation text fields: provide a concise, relevant response based on the candidate's software background or profile. Follow NARRATIVE VOICE.
 4. For narrative / open-ended questions (e.g. "Why do you want to work here?", "Describe your experience with X"):
-   - Write a polished, professional, compelling first-person answer using real facts and achievements from the resume context.
+   - Write a natural first-person answer using real facts from the resume context. Follow NARRATIVE VOICE.
    - Respect character limits if specified.
+${NARRATIVE_VOICE_RULES}
 5. For "select", "combobox", "radio", or "checkbox" fields:
    - Your "value" MUST be chosen strictly from the provided "options" list (matching either the option value or option label). Never leave a select on a placeholder like "-- Please Select --" or "Select...".
    - Options belong ONLY to their own fieldId. Never reuse a choice from another field.
@@ -683,6 +699,9 @@ CRITICAL OPERATING RULES:
         }
         ans.value = option.label;
       }
+      if (!OPTION_FIELD_TYPES.has(field.type) && typeof ans.value === "string") {
+        ans.value = stripModelDashes(ans.value);
+      }
       return true;
     });
     logger.info(`Received ${validatedAnswers.length} valid answers from AI in ${latencyMs}ms`);
@@ -704,8 +723,9 @@ CRITICAL OPERATING RULES:
 Rules:
 1. Stay strictly faithful to the candidate's actual experience from their resume highlights.
 2. Incorporate the candidate's specific feedback and revision instructions.
-3. Write in concise, compelling first-person.
-4. Output ONLY the rewritten answer text with no surrounding quotes or commentary.`;
+3. Follow NARRATIVE VOICE. First-person. Stay concise.
+4. Output ONLY the rewritten answer text with no surrounding quotes or commentary.
+${NARRATIVE_VOICE_RULES}`;
     const userPrompt = `Question Label: ${fieldLabel}
 Current Answer:
 ${currentValue}
@@ -717,7 +737,7 @@ Applicant Notes / Rules:
 ${profile.applicantNotes}
 
 User Revision Instructions:
-${feedback || "Improve clarity, impact, and tailoring for this job."}
+${feedback || "Make it clearer and more specific to this job."}
 ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters` : ""}`;
     logger.info(`Sending narrative rewrite request for "${fieldLabel}" using ${model}`);
     const startTime = Date.now();
@@ -748,7 +768,7 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
     const data = JSON.parse(response.responseText);
     const rewrittenText = data.choices?.[0]?.message?.content?.trim() || "";
     logger.info(`Narrative rewritten in ${latencyMs}ms (${rewrittenText.length} chars)`);
-    return rewrittenText;
+    return stripModelDashes(rewrittenText);
   }
 
   // src/fields/labels.js

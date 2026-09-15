@@ -68,6 +68,13 @@ This file tracks user-reported findings, platform bugs, audit analyses, and code
 
 ## Turn Change Log
 
+### Turn: 2026-09-15 — Human narrative voice in AI prompts
+
+- **User request**: Ground autofill/rewrite tone as complete human writing. No em dashes. Distill [humanizer skill](https://github.com/blader/humanizer/blob/main/SKILL.md) essentials into the system prompt instead of pasting the whole skill.
+- **Changed**: `src/ai.js` adds a shared `NARRATIVE_VOICE_RULES` block used by unified fill and rewrite prompts. Replaced "polished, professional, compelling" with natural first-person instructions. Hard bans cover em/en dashes, not-X-but-Y staging, dramatic closers, stock AI/sales wording, forced triads, and chatbot wrappers. Free-text answers and rewrite output also strip leftover em/en dashes; option-bound fields stay exact.
+- **Tests**: `tests/autofill.test.js` asserts both prompts include the voice rules and that dash stripping does not rewrite combobox labels. Full suite 66/66. Build v0.3.5.
+- **Next**: Reload the built userscript and spot-check a narrative field. Live OpenRouter tone cannot be certified from fixtures alone.
+
 ### Turn: 2026-09-15 — Bounded navigation readiness, v0.3.4
 
 - **Investigation**: Read explicitly requested systematic-debugging skill and condition-based-waiting guide. Traced screenshot error from DOM disabled state through `inspectValidation` into `repair`, where no field maps to it and workflow pauses. Reproduced slow navigation and delayed button enablement with failing tests; actual live timing remains inferred from screenshot/user sequence.

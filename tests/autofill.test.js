@@ -6,7 +6,7 @@ import { openCombobox, closeCombobox, setComboboxSearch, waitForComboboxOptions 
 import { fillCombobox } from '../src/fields/fillers.js';
 import { verifyCombobox } from '../src/fields/verify.js';
 import { normalizeFieldsForAI } from '../src/fields/normalize.js';
-import { generateAutofillAnswers } from '../src/ai.js';
+import { generateAutofillAnswers, rewriteNarrativeField } from '../src/ai.js';
 import { saveApiKey } from '../src/storage.js';
 
 beforeEach(() => {
@@ -235,6 +235,62 @@ test('second AI pass cannot request another search loop', async () => {
   globalThis.GM_xmlhttpRequest = options => options.onload({ status: 200, responseText: JSON.stringify({ choices: [{ message: { content: JSON.stringify({ answers: [{ fieldId: 'school', value: '', searchQuery: 'Guelph' }] }) } }] }) });
   const response = await generateAutofillAnswers([{ fieldId: 'school', type: 'combobox', options: [] }], { allowSearch: false });
   assert.equal(response.answers[0].searchQuery, undefined);
+});
+
+test('AI fill and rewrite prompts demand human voice and forbid em dashes', async () => {
+  saveApiKey('fixture-key');
+  let fillPrompt;
+  globalThis.GM_xmlhttpRequest = options => {
+    fillPrompt = JSON.parse(options.data).messages[0].content;
+    options.onload({ status: 200, responseText: JSON.stringify({ choices: [{ message: { content: '{"answers":[]}' } }] }) });
+  };
+  await generateAutofillAnswers([]);
+  assert.match(fillPrompt, /NARRATIVE VOICE/);
+  assert.match(fillPrompt, /em dashes/);
+  assert.match(fillPrompt, /\u2014/);
+  assert.doesNotMatch(fillPrompt, /polished, professional, compelling/);
+
+  let rewritePrompt;
+  globalThis.GM_xmlhttpRequest = options => {
+    rewritePrompt = JSON.parse(options.data).messages[0].content;
+    options.onload({ status: 200, responseText: JSON.stringify({ choices: [{ message: { content: 'I built the pipeline. Then I shipped it.' } }] }) });
+  };
+  await rewriteNarrativeField({ fieldLabel: 'Why us?', currentValue: 'old', feedback: 'shorter' });
+  assert.match(rewritePrompt, /NARRATIVE VOICE/);
+  assert.match(rewritePrompt, /em dashes/);
+  assert.match(rewritePrompt, /\u2014/);
+});
+
+test('free-text AI answers and rewrites strip em dashes but option values stay exact', async () => {
+  saveApiKey('fixture-key');
+  globalThis.GM_xmlhttpRequest = options => options.onload({
+    status: 200,
+    responseText: JSON.stringify({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            answers: [
+              { fieldId: 'why', value: 'I like the work \u2014 the team is strong.' },
+              { fieldId: 'race', value: 'Decline to state' },
+            ],
+          }),
+        },
+      }],
+    }),
+  });
+  const response = await generateAutofillAnswers([
+    { fieldId: 'why', type: 'textarea' },
+    { fieldId: 'race', type: 'combobox', options: [{ value: 'decline', label: 'Decline to state' }] },
+  ]);
+  assert.equal(response.answers.find(a => a.fieldId === 'why').value, 'I like the work, the team is strong.');
+  assert.equal(response.answers.find(a => a.fieldId === 'race').value, 'Decline to state');
+
+  globalThis.GM_xmlhttpRequest = options => options.onload({
+    status: 200,
+    responseText: JSON.stringify({ choices: [{ message: { content: 'I shipped the feature \u2014 then I measured it.' } }] }),
+  });
+  const rewritten = await rewriteNarrativeField({ fieldLabel: 'Why us?', currentValue: 'old', feedback: 'shorter' });
+  assert.equal(rewritten, 'I shipped the feature, then I measured it.');
 });
 
 test('workflow requests include job and validation context without putting the API key in the prompt', async () => {
