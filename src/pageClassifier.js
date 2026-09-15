@@ -18,8 +18,8 @@ export function visibleText(root = document.body) {
 export function classifyPage(doc = document) {
   const text = visibleText(doc.body);
   const headings = Array.from(doc.querySelectorAll('h1,h2,[role=heading]')).filter(isVisible).map(visibleText).join(' ');
-  const captcha = Array.from(doc.querySelectorAll('iframe[src*="recaptcha"],iframe[src*="hcaptcha"],iframe[src*="challenges.cloudflare"],[data-captcha],.g-recaptcha,.h-captcha')).some(isVisible);
-  if (captcha || /(?:complete|solve|verify|waiting for).{0,35}captcha|verify (?:that )?you are (?:human|not a robot)/i.test(text)) return { type: 'captcha', reason: 'Waiting for CAPTCHA to clear manually.' };
+  // A background anti-abuse widget is not an application-wide autofill boundary.
+  // Its controls are excluded by the scanner; site validation still governs Continue.
   const boundary = /assessment|identity verification|verify your identity|(?:recorded|video) interview|e-signature|electronic signature/i.exec(headings)
     || /\bI (?:certify|attest|declare under penalty)|\b(?:sign electronically|provide your electronic signature|start (?:the |your )?(?:assessment|video interview)|verify your identity)\b/i.exec(text);
   if (boundary) return { type: 'boundary', reason: `Manual action required: ${boundary[0]}.` };

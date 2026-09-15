@@ -1,7 +1,7 @@
 import { FIELD_TYPES } from '../constants.js';
 import { extractOptionLabel } from './labels.js';
 import { logger } from '../debug.js';
-import { optionKey, findExactOption, optionData, resolveComboboxParts, readComboboxSelection, openCombobox, closeCombobox, setComboboxSearch, waitForComboboxOptions, delay } from './combobox.js';
+import { optionKey, findExactOption, optionData, resolveComboboxParts, readComboboxSelection, openCombobox, closeCombobox, setComboboxSearch, waitForComboboxOptions, delay, clickFieldControl } from './combobox.js';
 
 function setNativeInputValue(element, value) {
   try {
@@ -265,7 +265,7 @@ export async function fillCombobox(element, targetValue, knownOptions) {
     match.element.scrollIntoView?.({ block: 'nearest' });
     match.element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
     match.element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0 }));
-    match.element.click();
+    clickFieldControl(match.element);
     for (let attempt = 0; attempt < 10; attempt++) {
       if (readComboboxSelection(element).some(value => optionKey(value) === optionKey(target))) return true;
       await delay(100);
@@ -295,6 +295,7 @@ export function fillContentEditable(element, value) {
 
 export async function fillField(field, targetValue) {
   if (!field || !field.element) return false;
+  logger.info(`Field action: id=${field.id || '(none)'}, type=${field.type}, tag=${field.element.tagName}, path=${window.location.pathname}`);
 
   switch (field.type) {
     case FIELD_TYPES.TEXTAREA:

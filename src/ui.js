@@ -710,6 +710,7 @@ function refreshDetectedFields() {
 async function executeAutofillFlow() {
   if (isAutofilling || applicationEngine?.busy) return;
   applicationEngine?.pause();
+  const runUrl = window.location.href;
   const page = classifyPage();
   if (['captcha', 'boundary', 'confirmation'].includes(page.type)) {
     autofillProgress.statusText = page.reason;
@@ -762,6 +763,7 @@ async function executeAutofillFlow() {
 
     const normalized = normalizeFieldsForAI(targetFields, { overwriteExisting: overwrite });
     let aiResponse = await generateAutofillAnswers(normalized);
+    if (window.location.href !== runUrl) throw new Error('Page changed during autofill. Inspect the current step before retrying.');
     if (['captcha', 'boundary', 'confirmation'].includes(classifyPage().type)) throw new Error(classifyPage().reason);
     if (aiResponse.answers.some(answer => answer.searchQuery)) {
       autofillProgress.statusText = 'Searching for missing combobox options...';
@@ -776,6 +778,7 @@ async function executeAutofillFlow() {
     let failedCount = 0;
 
     for (let i = 0; i < targetFields.length; i++) {
+      if (window.location.href !== runUrl) throw new Error('Page changed during autofill. Inspect the current step before retrying.');
       if (['captcha', 'boundary', 'confirmation'].includes(classifyPage().type)) throw new Error(classifyPage().reason);
       const field = targetFields[i];
       autofillProgress.current = i + 1;

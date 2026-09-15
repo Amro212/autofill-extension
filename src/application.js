@@ -11,6 +11,7 @@ import { fillField } from './fields/fillers.js';
 import { verifyField } from './fields/verify.js';
 import { generateAutofillAnswers } from './ai.js';
 import { resolveComboboxSearchAnswers } from './autofill.js';
+import { logger } from './debug.js';
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const scanFormFields = () => scanAllFields().filter(f => isVisible(f.element) && !f.element.disabled && !f.element.readOnly && f.element.type !== 'file');
@@ -65,7 +66,12 @@ export function createApplicationEngine({ answer = generateAutofillAnswers, onCh
       field.element.scrollIntoView?.({ block: 'center', behavior: 'instant' });
       const filled = await fillField(field, entry.value);
       await delay(settleMs);
-      if (!guard(token) || pageSignature(scanFormFields()) !== signature) return false;
+      if (!guard(token)) return false;
+      if (pageSignature(scanFormFields()) !== signature) {
+        logger.warn(`Page changed during field action: id=${field.id}, path=${window.location.pathname}`);
+        status('paused', 'Page changed while filling a field. Inspect the current step before resuming.');
+        return false;
+      }
       const live = scanFormFields().find(f => f.id === field.id && f.label === field.label);
       const verified = filled && live ? await verifyField(live, entry.value) : { verified: false };
       // Phase 2's generic verifier only checks non-empty values. Workflow requires exact persistence.
@@ -178,6 +184,7 @@ export function createApplicationEngine({ answer = generateAutofillAnswers, onCh
         session.pendingAt = Date.now();
         status('running', 'Continuing; waiting for the next step.');
         bindTab(session);
+        logger.info(`Navigation action: ${control.textContent?.trim() || control.value || 'Continue'}, path=${window.location.pathname}`);
         control.click();
         await delay(transitionMs);
         if (!guard(token)) return;

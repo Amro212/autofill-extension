@@ -6,6 +6,16 @@ This file tracks user-reported findings, platform bugs, audit analyses, and code
 
 ## Findings & Bug Reports
 
+### Entry: 2026-09-15 — Real Workday backward navigation and Greenhouse CAPTCHA false block
+
+- **Phase / Environment**: Phase 3 manual acceptance; user confirms custom simulation works. Real Cisco Workday application, My Information after resume attachment; Greenhouse Canonical job 8142329, userscript v0.3.1.
+- **Observed**: Start / Resume returns to resume attachment when AI answers begin applying. Autofill This Page also fails. Greenhouse shows 67 fields but zero steps/answers because CAPTCHA classification blocks the whole form; only background badge is visible in supplied screenshot.
+- **User request**: Diagnose and fix backward navigation; remove blanket CAPTCHA blocking of ordinary autofill. This changes the original Phase 3 CAPTCHA gating requirement. No solving or interaction with CAPTCHA requested.
+- **Audit**: Screenshots do not prove site anti-automation behavior. Investigating generic dropdown event dispatch, field/control ownership and false classification. Actual Workday DOM/event trace not supplied; live root cause unconfirmed.
+- **Target**: Current Phase 3 acceptance fixes; keep broader ATS adapters in Phase 4.
+- **Follow-up evidence**: User supplied Cisco job `Software-Engineer_2023758` under `cisco.wd5.myworkdayjobs.com`, route ending `/apply/autofillWithResume`. Supplied logs contain successful local fixture AI calls (roughly 64–66 KB requests), but no Workday field or navigation action. Live read-only inspection reaches Create Account/Sign In, so the authenticated My Information failure could not be reproduced live.
+- **Reproduced code defects**: Dropdown cleanup emits bubbling Escape events to unrelated active controls and document navigation handlers; implicit submit dropdown buttons trigger native form submission; scanner skips `type=button` dropdowns. Five new regression cases initially failed and pass after fixes. These are plausible rollback mechanisms, not a confirmed live Workday root cause.
+
 ### Entry: 2026-09-14 — Phase 3 workflow audit
 
 - **Context / Phase**: Phase 3 implementation; deterministic jsdom fixtures and bundled panel.
@@ -36,6 +46,13 @@ This file tracks user-reported findings, platform bugs, audit analyses, and code
 ---
 
 ## Turn Change Log
+
+### Turn: 2026-09-15 — Real-site acceptance fixes, v0.3.2
+
+- **Modified**: `src/pageClassifier.js` removes blanket CAPTCHA blocking per user request; `src/fields/scanner.js` excludes challenge/response controls and supports button dropdowns; `src/fields/combobox.js` removes synthetic Escape cleanup, prevents implicit submit defaults, reads button selections; `src/fields/fillers.js` uses safe dropdown option clicks and logs field metadata; `src/application.js` logs navigation and pauses after unexpected step changes during filling; `src/ui.js` checks URL changes during one-page autofill.
+- **Tests / documentation**: Added regression cases in `tests/autofill.test.js` and `tests/application.test.js`; updated `PHASE_3_REPORT.md`, package version/lock and generated userscript.
+- **Verified**: 55 tests pass, build succeeds, v0.3.2 produced. Five initial regression failures reproduced the shared dropdown/CAPTCHA defects before changes. Live Cisco page was inspected read-only but the My Information step needs the user's authenticated session; actual rollback not yet confirmed fixed.
+- **Next**: User updates Tampermonkey and retries Cisco My Information with Auto Continue off first; if rollback persists, collect new Field action / Navigation action logs. Test Greenhouse ordinary autofill with background CAPTCHA badge. No commit/tag.
 
 ### Turn: 2026-09-14 — Phase 3 application engine implementation
 

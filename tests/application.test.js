@@ -112,20 +112,21 @@ test('engine repairs server rejection, advances two steps and stops before submi
   assert.ok(engine.session.errors.some(e => e.fieldId === 'answer'));
   engine.destroy();
 });
-test('CAPTCHA clears into continuation; assessment remains paused without answering', async () => {
-  render(`<div role="alert">Please complete the CAPTCHA</div>${input()}<button>Continue</button>`);
+test('background CAPTCHA does not block filling; assessment still pauses', async () => {
+  render(`<iframe src="https://www.google.com/recaptcha/api2/anchor"></iframe>${input()}<button>Continue</button>`);
   let calls = 0;
   const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: async fields => { calls++; return { answers: fields.map(f => ({ fieldId: f.fieldId, value: 'Test Applicant' })) }; } });
-  await engine.start(job());
-  assert.equal(engine.session.status, 'captcha');
-  assert.equal(calls, 0);
-  document.querySelector('[role=alert]').remove();
   document.querySelector('button').onclick = () => render('<h1>Skills assessment</h1><label>Answer<input required></label><button>Continue</button>');
-  await engine.tick();
+  await engine.start(job());
   assert.equal(engine.session.status, 'boundary');
   assert.equal(document.querySelector('input').value, '');
   assert.equal(calls, 1);
   engine.destroy();
+});
+
+test('CAPTCHA response controls are never offered as applicant fields', () => {
+  render(`${input()}<textarea name="g-recaptcha-response"></textarea><div class="h-captcha"><input name="challenge-answer"></div>`);
+  assert.deepEqual(scanFormFields().map(f => f.id), ['name']);
 });
 test('unchanged pages have bounded navigation attempts and no repeat primary request', async () => {
   render(`${input()}<button type="button">Continue</button>`);
@@ -305,4 +306,17 @@ test('tab-bound recent navigation recovers a same-application POST redirect only
   session.pendingAt = Date.now() - 180000;
   saveSession(session);
   assert.equal(await restoreSession('https://example.com/apply/42/step2'), null);
+});
+
+test('unexpected step change during a field action pauses instead of filling the previous step', async () => {
+  render(`${input()}<button>Continue</button>`);
+  document.querySelector('input').oninput = () => {
+    window.history.replaceState({}, '', '/apply/autofillWithResume');
+    render('<h1>Autofill with Resume</h1><input id="resume" type="file">');
+  };
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: async () => ({ answers: [{ fieldId: 'name', value: 'Applicant' }] }) });
+  await engine.start(job());
+  assert.equal(engine.session.status, 'paused');
+  assert.match(engine.session.reason, /Page changed while filling/);
+  engine.destroy();
 });

@@ -1,8 +1,17 @@
 # Phase 3 — Application Engine
 
+## 2026-09-15 acceptance fix update
+
+- User confirms custom simulation works; real Workday rollback and Greenhouse CAPTCHA blocking reported. Real ATS acceptance remains pending.
+- New build removes blanket CAPTCHA classification. Background badges/widgets no longer block ordinary autofill. CAPTCHA response fields are excluded from applicant fields. Site validation and manual final submission remain in place.
+- Shared dropdown fixes remove synthetic Escape cleanup, prevent implicit native form submissions from dropdown clicks, recognize button dropdowns and their selected labels.
+- Added field/navigation action logs (field metadata and route, no answer values) and pause on unexpected page change during workflow filling.
+- Cisco authenticated application was not accessible from the inspection browser; live page showed account/sign-in. Workday rollback cause remains unconfirmed until retested with the new build.
+- **Supersedes CAPTCHA steps below:** The original fake challenge-only page now pauses because it has no application fields. Remove it manually and press Start / Resume. On ordinary forms with a background CAPTCHA badge, filling must proceed without a CAPTCHA status block.
+
 **Status:** Implemented for manual acceptance. Phase is not signed off.
-**Build:** `dist/job-copilot.user.js`, version **0.3.1**.
-**Validation:** `npm test`: **50 passed, 0 failed**. `npm run build`: passed. Bundled panel smoke test and deterministic multi-step DOM fixture passed. Live Zen/Firefox + Tampermonkey acceptance remains pending.
+**Build:** `dist/job-copilot.user.js`, version **0.3.2**.
+**Validation:** `npm test`: **55 passed, 0 failed**. `npm run build`: passed. Bundled panel smoke test and deterministic multi-step DOM fixture passed. Live Zen/Firefox + Tampermonkey acceptance remains pending.
 
 ## Delivered
 
@@ -23,7 +32,7 @@
 
 ## Manual test setup
 
-1. Update Tampermonkey with `dist/job-copilot.user.js`. Confirm panel shows v0.3.1.
+1. Update Tampermonkey with `dist/job-copilot.user.js`. Confirm panel shows v0.3.2.
 2. Configure your actual profile and OpenRouter key. Auto Continue on; Auto Submit stays disabled.
 3. Serve development fixtures from the repository root:
 
