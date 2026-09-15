@@ -92,6 +92,8 @@ function getBanner(pkg) {
 // @grant        GM_listValues
 // @grant        GM_xmlhttpRequest
 // @grant        GM_registerMenuCommand
+// @grant        GM_getTab
+// @grant        GM_saveTab
 // @run-at       document-idle
 // ==/UserScript==
 `;

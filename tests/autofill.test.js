@@ -237,6 +237,20 @@ test('second AI pass cannot request another search loop', async () => {
   assert.equal(response.answers[0].searchQuery, undefined);
 });
 
+test('workflow requests include job and validation context without putting the API key in the prompt', async () => {
+  saveApiKey('fixture-private-key');
+  let payload;
+  globalThis.GM_xmlhttpRequest = options => {
+    payload = JSON.parse(options.data);
+    options.onload({ status: 200, responseText: JSON.stringify({ choices: [{ message: { content: '{"answers":[]}' } }] }) });
+  };
+  await generateAutofillAnswers([], { jobContext: { title: 'Engineer', company: 'Example' }, repairErrors: [{ fieldId: 'essay', message: 'Too short' }] });
+  const content = JSON.parse(payload.messages[1].content);
+  assert.equal(content.jobContext.company, 'Example');
+  assert.equal(content.repairErrors[0].fieldId, 'essay');
+  assert.equal(JSON.stringify(payload).includes('fixture-private-key'), false);
+});
+
 test('query resolution asks AI to choose only from newly harvested options', async () => {
   const { resolveComboboxSearchAnswers } = await import('../src/autofill.js');
   saveApiKey('fixture-key');

@@ -123,6 +123,10 @@ export function getSanitizedState() {
 }
 
 export function resetAll() {
+  for (const id of gmGet(STORAGE_KEYS.SESSIONS, [])) gmDelete(`${STORAGE_KEYS.SESSIONS}:${id}`);
+  gmDelete(STORAGE_KEYS.SESSIONS);
+  gmDelete(STORAGE_KEYS.JOB);
+  gmDelete(STORAGE_KEYS.MEMORY);
   gmDelete(STORAGE_KEYS.SETTINGS);
   gmDelete(STORAGE_KEYS.PROFILE);
   gmDelete(STORAGE_KEYS.SECRETS);

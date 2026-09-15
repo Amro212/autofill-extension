@@ -25,6 +25,11 @@ import {
   initInlineRewriteBadge,
 } from './fields/highlight.js';
 import { startFormObserver, pauseFormObserver, resumeFormObserver } from './observer.js';
+import { createApplicationEngine } from './application.js';
+import { classifyPage } from './pageClassifier.js';
+
+let applicationEngine = null;
+let applicationState = null;
 
 function resolveLiveElement(field) {
   if (!field) return null;
@@ -703,6 +708,14 @@ function refreshDetectedFields() {
 }
 
 async function executeAutofillFlow() {
+  if (isAutofilling || applicationEngine?.busy) return;
+  applicationEngine?.pause();
+  const page = classifyPage();
+  if (['captcha', 'boundary', 'confirmation'].includes(page.type)) {
+    autofillProgress.statusText = page.reason;
+    updatePanelDOM();
+    return;
+  }
   const apiKey = getApiKey();
   if (!apiKey) {
     alert('Please configure your OpenRouter API Key in Settings first.');
@@ -749,6 +762,7 @@ async function executeAutofillFlow() {
 
     const normalized = normalizeFieldsForAI(targetFields, { overwriteExisting: overwrite });
     let aiResponse = await generateAutofillAnswers(normalized);
+    if (['captcha', 'boundary', 'confirmation'].includes(classifyPage().type)) throw new Error(classifyPage().reason);
     if (aiResponse.answers.some(answer => answer.searchQuery)) {
       autofillProgress.statusText = 'Searching for missing combobox options...';
       updatePanelDOM();
@@ -762,6 +776,7 @@ async function executeAutofillFlow() {
     let failedCount = 0;
 
     for (let i = 0; i < targetFields.length; i++) {
+      if (['captcha', 'boundary', 'confirmation'].includes(classifyPage().type)) throw new Error(classifyPage().reason);
       const field = targetFields[i];
       autofillProgress.current = i + 1;
       autofillProgress.statusText = `Filling ${i + 1} of ${targetFields.length}: "${field.label}"`;
@@ -922,6 +937,21 @@ function renderHomeTab() {
   const settings = getSettings();
   const currentHost = window.location.hostname;
   const fieldCount = detectedFieldsCache.length;
+  const session = applicationState?.session;
+  const job = session?.job;
+  const workflowHtml = `<div class="jc-card">
+    <span class="jc-card-title">Phase 3 · Application Workflow</span>
+    <div style="font-size:12px;white-space:pre-wrap">${escapeHtml(job ? `${job.title}\n${job.company || 'Company unknown'}${job.companyUncertain ? ' (uncertain)' : ''}${job.location ? '\n' + job.location : ''}` : 'Capture a job listing, then start on its application page.')}</div>
+    ${job ? `<div style="font-size:11px;overflow-wrap:anywhere">${escapeHtml(job.listingUrl)}</div>` : ''}
+    <div role="status" style="font-size:12px">${escapeHtml(session ? `${session.status}: ${session.reason}` : 'No active session.')}</div>
+    ${session ? `<div style="font-size:11px">Session ${escapeHtml(session.id.slice(0, 8))} · ${session.history.length} steps · ${Object.keys(session.answers).length} remembered answers</div>` : ''}
+    <div class="jc-row">
+      <button class="jc-btn jc-btn-secondary" id="jc-capture-job" ${isAutofilling || applicationEngine?.busy ? 'disabled' : ''}>Capture Job</button>
+      <button class="jc-btn" id="jc-start-application" ${isAutofilling || applicationEngine?.busy ? 'disabled' : ''}>${session ? 'Start / Resume' : 'Start Application'}</button>
+      <button class="jc-btn jc-btn-secondary" id="jc-pause-application">Pause</button>
+    </div>
+    ${session?.errors.length ? `<div style="font-size:11px;color:#fbbf24">Last error: ${escapeHtml(session.errors.at(-1).message)}</div>` : ''}
+  </div>`;
 
   let progressHtml = '';
   if (isAutofilling || autofillProgress.statusText) {
@@ -986,6 +1016,7 @@ function renderHomeTab() {
       </div>
     </div>
 
+    ${workflowHtml}
     ${progressHtml}
 
     <div class="jc-card">
@@ -1142,7 +1173,7 @@ function renderProfileTab() {
 
 function renderSettingsTab() {
   const settings = getSettings();
-  const apiKey = getApiKey();
+  const hasApiKey = Boolean(getApiKey());
 
   const modelOptions = POPULAR_MODELS.map((m) => {
     const selected = settings.model === m ? 'selected' : '';
@@ -1154,11 +1185,11 @@ function renderSettingsTab() {
       <div class="jc-form-group">
         <label>OpenRouter API Key</label>
         <div class="jc-row">
-          <input class="jc-input" id="jc-api-key-input" type="password" placeholder="sk-or-v1-..." value="${escapeHtml(apiKey)}" />
+          <input class="jc-input" id="jc-api-key-input" type="password" autocomplete="off" placeholder="${hasApiKey ? 'Key saved — enter replacement' : 'sk-or-v1-...'}" />
           <button type="button" class="jc-btn jc-btn-secondary" id="jc-toggle-key-btn" style="padding: 8px 10px;">👁</button>
         </div>
         <span style="font-size: 11px; color: #64748b;">
-          Stored exclusively in GM userscript storage. Never exposed to page DOM.
+          Saved key stays in userscript storage. Leave blank to keep it.
         </span>
       </div>
 
@@ -1210,10 +1241,10 @@ function renderSettingsTab() {
         <div class="jc-toggle-row">
           <div>
             <div class="jc-label">Auto Submit</div>
-            <div style="font-size: 11px; color: #64748b;">Final application submission (Default OFF)</div>
+            <div style="font-size: 11px; color: #64748b;">Final submission stays manual in Phase 3</div>
           </div>
           <label class="jc-switch">
-            <input type="checkbox" name="autoSubmit" ${settings.autoSubmit ? 'checked' : ''} />
+            <input type="checkbox" name="autoSubmit" disabled />
             <span class="jc-slider"></span>
           </label>
         </div>
@@ -1370,6 +1401,12 @@ function updatePanelDOM() {
 
 function attachEventHandlers() {
   if (!shadowRootRef) return;
+  const capture = shadowRootRef.querySelector('#jc-capture-job');
+  if (capture) capture.onclick = () => applicationEngine?.capture();
+  const start = shadowRootRef.querySelector('#jc-start-application');
+  if (start) start.onclick = () => void applicationEngine?.start();
+  const pause = shadowRootRef.querySelector('#jc-pause-application');
+  if (pause) pause.onclick = () => applicationEngine?.pause();
 
   // Toggle button handler
   const toggleBtn = shadowRootRef.querySelector('#jc-toggle-btn');
@@ -1546,8 +1583,9 @@ function attachEventHandlers() {
 
       saveSettings(newSettings);
 
-      if (apiKeyInput) {
+      if (apiKeyInput?.value.trim()) {
         saveApiKey(apiKeyInput.value);
+        apiKeyInput.value = '';
       }
 
       logger.info('Settings saved.');
@@ -1618,6 +1656,14 @@ export function mountUI() {
       refreshDetectedFields();
       updatePanelDOM();
     });
+
+    applicationEngine = createApplicationEngine({ onChange: state => {
+      applicationState = state;
+      for (const [id, result] of state.results) fieldResultsCache.set(id, result);
+      refreshDetectedFields();
+      updatePanelDOM();
+    } });
+    void applicationEngine.initialize();
 
     logger.info('Job Copilot Shadow DOM UI mounted successfully.');
   }
