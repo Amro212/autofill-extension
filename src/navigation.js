@@ -8,7 +8,7 @@ export function findContinue(doc = document) {
   return candidates.length === 1 ? candidates[0] : null;
 }
 export function pageSignature(fields, doc = document) {
-  return JSON.stringify([doc.location.href, Array.from(doc.querySelectorAll('h1,h2,[aria-current=step]')).filter(isVisible).map(visibleText), fields.map(f => [f.id, f.label, f.type])]);
+  return JSON.stringify([doc.location.href, Array.from(doc.querySelectorAll('h1,h2,h3,[aria-current=step]')).filter(isVisible).map(visibleText), fields.map(f => [f.id, f.label, f.type])]);
 }
 export function isDisabled(control) {
   return Boolean(control?.disabled || control?.getAttribute('aria-disabled') === 'true');

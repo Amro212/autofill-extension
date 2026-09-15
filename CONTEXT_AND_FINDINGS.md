@@ -6,6 +6,27 @@ This file tracks user-reported findings, platform bugs, audit analyses, and code
 
 ## Findings & Bug Reports
 
+### Entry: 2026-09-15 — Continue temporarily disabled during Workday transition
+
+- **Phase / Environment**: Phase 3, Cisco Workday v0.3.3. Screenshot confirms Auto Continue ON. User observed automatic first-to-second-page progression followed by pause.
+- **Evidence**: Panel shows `Validation needs manual input: Continue is disabled.`, one recorded step, two remembered answers, but 56 current fields. No transition timing log supplied.
+- **Trace / hypothesis**: `inspectValidation` reports the DOM button's disabled state, not the saved setting. Controller waits a fixed 1200 ms after clicking, then routes disabled-only errors into field repair; no field maps to this error, so it permanently pauses. A slower save/render can finish after that pause. Reproducing delayed transitions and temporary pre-navigation disablement before changing code.
+- **Target**: Current Phase 3 controller timing; preserve Phase 2 scanners, label extraction and fillers.
+
+### Entry: 2026-09-15 — CoStar Workday reproduces pause with Auto Continue ON
+
+- **Phase / Environment**: Phase 3 acceptance, new CoStar/Matterport Software Engineer I application, v0.3.2. User explicitly confirms Auto Continue ON; manual Save and Continue plus Start / Resume still needed.
+- **Evidence**: 06:03:56 received five valid answers; 06:03:57 selected Yes in first questionnaire dropdown then immediately emitted page-change warning on unchanged application URL. Screenshot shows same Application Questions step, four remaining questions unfilled. Settings/language selectors included in scans.
+- **Audit / Target**: Reproduce mutable dropdown labels and field order causing signature changes; fix current-phase progression without weakening genuine navigation guards. Full workflow remains unaccepted.
+
+### Entry: 2026-09-15 — Workday rollback resolved; workflow pauses after dropdown selection
+
+- **Phase / Environment**: Phase 3 real Cisco Workday retest, v0.3.2. User confirms no return to resume attachment; manual Save and Continue plus Start / Resume required between steps.
+- **Evidence**: Screenshot shows Application Questions, one selected Yes, multiple required dropdowns/date empty; panel paused with `Page changed while filling a field`, 3 steps and 10 remembered answers. Logs show 10 valid AI answers at 05:55:12, first questionnaire dropdown selected Yes at 05:55:13, immediately followed by page-change warning on the same URL path.
+- **Assessment**: Rollback fix passed user retest. Full automatic workflow has not passed. Current page signature includes field labels/IDs/types and headings; a same-step dropdown rerender or label change may trip the strict signature guard. This mechanism is suspected from sequence, not conclusively identified without before/after signatures. Scanner also includes unrelated `settingsSelectorButton` and `languageSelectorButton`.
+- **Expected behavior**: With Auto Continue enabled and Start / Resume used, valid pages should advance and next step should fill automatically until review/boundary. Autofill This Page and Auto Continue disabled intentionally require manual progression. Supplied logs do not establish the saved Auto Continue setting; previous retest instructions explicitly requested disabling it.
+- **Target / Next**: Phase 3 acceptance fixes: distinguish real step transitions from same-step field changes, scope out page-level controls, retest with Auto Continue enabled after fixing the pause. This turn records assessment only; no runtime code changed.
+
 ### Entry: 2026-09-15 — Real Workday backward navigation and Greenhouse CAPTCHA false block
 
 - **Phase / Environment**: Phase 3 manual acceptance; user confirms custom simulation works. Real Cisco Workday application, My Information after resume attachment; Greenhouse Canonical job 8142329, userscript v0.3.1.
@@ -46,6 +67,27 @@ This file tracks user-reported findings, platform bugs, audit analyses, and code
 ---
 
 ## Turn Change Log
+
+### Turn: 2026-09-15 — Bounded navigation readiness, v0.3.4
+
+- **Investigation**: Read explicitly requested systematic-debugging skill and condition-based-waiting guide. Traced screenshot error from DOM disabled state through `inspectValidation` into `repair`, where no field maps to it and workflow pauses. Reproduced slow navigation and delayed button enablement with failing tests; actual live timing remains inferred from screenshot/user sequence.
+- **Changed**: `src/application.js` replaces fixed post-click delay with a bounded readiness wait, separately handles pre-click disabled buttons, detects stable populated next steps and `aria-busy`, preserves cancellation/boundary/review stops, logs wait outcomes, and keeps disabled-only errors out of AI repair. No Phase 2 scanner, label, dropdown or filler changes this turn.
+- **Tests / outputs**: `tests/application.test.js` adds five timing/lifecycle regressions. 64 tests pass; build v0.3.4 succeeds. Updated package/lock versions, `PHASE_3_REPORT.md` and generated userscript.
+- **Next**: User updates/reloads Workday and starts with Auto Continue ON. Expect visible waiting status during saves, followed by automatic next-step filling. If timeout persists, inspect Navigation wait logs and the page's own validation. Phase 3 acceptance remains pending; no commit/tag.
+
+### Turn: 2026-09-15 — Preserve Phase 2 compatibility without repeated user retesting
+
+- **User requirement**: Phase 3/Workday fixes must preserve previously working single-page Lever, Ashby and Greenhouse behavior. User does not want to repeatedly retest Phase 2 applications after each change.
+- **Execution constraint**: Protect shared scanner, label, dropdown, filler and verification changes with targeted regression tests for existing behavior, in addition to new Workday reproductions. Prefer narrow changes; do not claim complete live-site compatibility from synthetic test results alone.
+- **Evidence / limitation**: v0.3.3 passed all 59 automated tests, including existing Phase 2 dropdown ownership, selection, search and Greenhouse-style cases. This is regression evidence, not a live acceptance pass for every ATS or complete coverage of all label/scanner layouts.
+- **Changes this turn**: Context documentation only; no runtime changes or build required.
+
+### Turn: 2026-09-15 — Workday label stability / automatic progression, v0.3.3
+
+- **Root cause reproduced**: Button `aria-labelledby="question buttonId"` incorporates selected text into question identity. Selecting Yes changes the page signature and fires the exact same-step pause seen in both user logs. Actual live DOM not captured, but controlled reproduction matches the observed sequence.
+- **Modified**: `src/fields/labels.js` excludes self/selected-value references and interactive descendants from referenced question text; `src/fields/scanner.js` excludes page chrome controls; `src/navigation.js` includes H3 step headings. Updated `tests/application.test.js`, `PHASE_3_REPORT.md`, package metadata/lock and generated userscript v0.3.3.
+- **Verification**: Four new regressions failed before changes and passed afterward; full suite 59/59 passes; build succeeds. Workflow regression advances across same-URL steps automatically and stops at review. Existing true-navigation interruption tests remain passing.
+- **Next**: Update/reload Tampermonkey, Auto Continue ON, Start / Resume once. Confirm remaining questions fill and next step begins automatically. Phase 3 manual acceptance still pending; no commit/tag.
 
 ### Turn: 2026-09-15 — Real-site acceptance fixes, v0.3.2
 

@@ -1,5 +1,17 @@
 # Phase 3 — Application Engine
 
+## v0.3.4 — Wait for navigation readiness
+
+Reproduced a disabled-button pause after a slow save: the fixed post-click delay expired before the next step rendered, then the controller misrouted the disabled button into field repair. Workflow now polls for a changed, briefly stable step with available fields and no visible `aria-busy` region, or for the existing button to become enabled before clicking. Waiting is bounded to 10 seconds and respects Pause, review and boundaries. Real field validation errors still go through repair; disabled buttons do not consume AI repair attempts. Timeout wording explicitly refers to the page button, not the Auto Continue preference.
+
+Five new tests cover delayed saving, delayed button readiness, permanent disablement, cancellation during waiting and staged busy rendering. Full suite: 64 passed. Build: v0.3.4. Only workflow controller behavior changed in this update; Phase 2 scanner/label/filler code was not changed. Live Workday retest remains pending.
+
+## v0.3.3 — Workday same-step dropdown pause
+
+Reproduced the reported sequence in a regression fixture: an `aria-labelledby` reference to the dropdown itself appends `Select One` to the question; selecting `Yes` changes the question label and therefore the page signature. The controller incorrectly pauses as if navigation happened. Label extraction now omits the control and selected-value descendants from referenced question text. Header/navigation/footer controls are excluded from applicant scanning. H3 headings now distinguish same-URL application steps.
+
+New end-to-end regression fills the dropdown and remaining question, clicks Save and Continue, fills the next same-URL step, then stops at review without a second Start. All 59 tests pass; v0.3.3 build succeeds. Authenticated live Workday retest remains pending. Update the userscript, reload, keep Auto Continue ON and press Start / Resume once. Genuine unexpected page changes and validation/boundary failures still pause.
+
 ## 2026-09-15 acceptance fix update
 
 - User confirms custom simulation works; real Workday rollback and Greenhouse CAPTCHA blocking reported. Real ATS acceptance remains pending.
@@ -10,8 +22,8 @@
 - **Supersedes CAPTCHA steps below:** The original fake challenge-only page now pauses because it has no application fields. Remove it manually and press Start / Resume. On ordinary forms with a background CAPTCHA badge, filling must proceed without a CAPTCHA status block.
 
 **Status:** Implemented for manual acceptance. Phase is not signed off.
-**Build:** `dist/job-copilot.user.js`, version **0.3.2**.
-**Validation:** `npm test`: **55 passed, 0 failed**. `npm run build`: passed. Bundled panel smoke test and deterministic multi-step DOM fixture passed. Live Zen/Firefox + Tampermonkey acceptance remains pending.
+**Build:** `dist/job-copilot.user.js`, version **0.3.4**.
+**Validation:** `npm test`: **64 passed, 0 failed**. `npm run build`: passed. Bundled panel smoke test and deterministic multi-step DOM fixture passed. Live Zen/Firefox + Tampermonkey acceptance remains pending.
 
 ## Delivered
 
@@ -32,7 +44,7 @@
 
 ## Manual test setup
 
-1. Update Tampermonkey with `dist/job-copilot.user.js`. Confirm panel shows v0.3.2.
+1. Update Tampermonkey with `dist/job-copilot.user.js`. Confirm panel shows v0.3.4.
 2. Configure your actual profile and OpenRouter key. Auto Continue on; Auto Submit stays disabled.
 3. Serve development fixtures from the repository root:
 

@@ -70,7 +70,7 @@ export function scanFormFields(root = document) {
     [contenteditable="true"],
     [role="combobox"],
     button[aria-haspopup="listbox"]
-  `)).filter((el) => !isInsideCopilot(el) && !el.closest('.g-recaptcha,.h-captcha,[data-captcha]') && !/^(g-recaptcha-response|h-captcha-response|cf-turnstile-response)(?:$|-)/i.test(el.name || el.id || ''));
+  `)).filter((el) => !isInsideCopilot(el) && !el.closest('header,nav,footer,[role="banner"],[role="navigation"],[role="contentinfo"],.g-recaptcha,.h-captcha,[data-captcha]') && !/^(g-recaptcha-response|h-captcha-response|cf-turnstile-response)(?:$|-)/i.test(el.name || el.id || ''));
 
   for (const el of candidates) {
     if (processedElements.has(el)) continue;

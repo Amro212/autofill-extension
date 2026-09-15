@@ -18,11 +18,11 @@ const scanFormFields = () => scanAllFields().filter(f => isVisible(f.element) &&
 const empty = field => field.type === 'checkbox' ? !field.element.checked : !String(field.currentValue ?? '').trim();
 const runnable = new Set(['running', 'captcha', 'waiting']);
 
-export function createApplicationEngine({ answer = generateAutofillAnswers, onChange = () => {}, settleMs = 180, transitionMs = 1200 } = {}) {
+export function createApplicationEngine({ answer = generateAutofillAnswers, onChange = () => {}, settleMs = 180, transitionMs = 1200, navigationTimeoutMs = transitionMs === 0 ? 0 : 10000 } = {}) {
   let session = null, busy = false, generation = 0, timer = null, observer = null, interval = null;
   const results = new Map();
   let lastEmission = '';
-  function validation(fields = scanFormFields(), control = findContinue()) {
+  function validation(fields = scanFormFields(), control = null) {
     const errors = inspectValidation(fields, control);
     for (const field of fields) {
       const result = results.get(field.id);
@@ -54,6 +54,38 @@ export function createApplicationEngine({ answer = generateAutofillAnswers, onCh
       return false;
     }
     return true;
+  }
+  async function waitForNavigation(signature, token, afterClick) {
+    const deadline = Date.now() + navigationTimeoutMs;
+    let lastSignature = signature, stableSince = Date.now();
+    const stableMs = Math.min(transitionMs, 200);
+    status('running', afterClick ? 'Waiting for the next page to finish loading.' : 'Waiting for the page Continue button to become ready.');
+    logger.info(`Navigation wait: ${afterClick ? 'after click' : 'button readiness'}, timeout=${navigationTimeoutMs}ms`);
+    do {
+      if (!guard(token)) return 'stopped';
+      const fields = scanFormFields();
+      const current = pageSignature(fields);
+      if (current !== lastSignature) { lastSignature = current; stableSince = Date.now(); }
+      const busy = Array.from(document.querySelectorAll('[aria-busy="true"]')).some(isVisible);
+      const control = findContinue();
+      if (!busy && Date.now() - stableSince >= stableMs) {
+        if (current !== signature && fields.length) {
+          logger.info(`Navigation wait: next step ready, ${fields.length} fields`);
+          return 'changed';
+        }
+        if (current === signature) {
+          if (inspectValidation(fields).length) return 'validation';
+          if (!afterClick && control && !isDisabled(control)) return 'ready';
+        }
+      }
+      if (Date.now() >= deadline) break;
+      await delay(Math.min(100, Math.max(1, deadline - Date.now())));
+    } while (true);
+    logger.warn(`Navigation wait timed out: buttonDisabled=${isDisabled(findContinue())}, path=${window.location.pathname}`);
+    return 'timeout';
+  }
+  function pauseDisabledButton() {
+    status('paused', `The page's Continue button stayed disabled after waiting ${navigationTimeoutMs / 1000}s. Auto Continue is still on; inspect the page before resuming.`);
   }
   async function applyAnswers(fields, answers, token, signature) {
     const byId = new Map(answers.map(a => [a.fieldId, a]));
@@ -168,13 +200,20 @@ export function createApplicationEngine({ answer = generateAutofillAnswers, onCh
         }
         if (!guard(token) || pageSignature(scanFormFields()) !== signature) continue;
         let control = findContinue();
-        const errors = validation(scanFormFields(), control);
+        const errors = validation(scanFormFields());
         if (errors.length) {
           if (await repair(errors, step, token, signature)) continue;
           return;
         }
         if (!getSettings().autoContinue) { status('paused', 'Page filled. Auto Continue is off.'); return; }
         control = findContinue();
+        if (control && isDisabled(control)) {
+          const readiness = await waitForNavigation(signature, token, false);
+          if (readiness === 'stopped') return;
+          if (readiness === 'changed' || readiness === 'validation') continue;
+          if (readiness === 'timeout') { pauseDisabledButton(); return; }
+          control = findContinue();
+        }
         if (!control || isDisabled(control)) { status('paused', 'No unambiguous enabled Continue control. Continue manually.'); return; }
         if (step.clicks >= 3 || session.transitions >= 30) { status('paused', 'Navigation limit reached. Continue manually.'); return; }
         if (!guard(token)) return;
@@ -186,11 +225,13 @@ export function createApplicationEngine({ answer = generateAutofillAnswers, onCh
         bindTab(session);
         logger.info(`Navigation action: ${control.textContent?.trim() || control.value || 'Continue'}, path=${window.location.pathname}`);
         control.click();
-        await delay(transitionMs);
-        if (!guard(token)) return;
-        if (pageSignature(scanFormFields()) !== signature) continue;
-        const rejected = inspectValidation(scanFormFields(), findContinue());
+        const transition = await waitForNavigation(signature, token, true);
+        if (transition === 'stopped') return;
+        if (transition === 'changed') continue;
+        const rejected = inspectValidation(scanFormFields());
         if (rejected.length && await repair(rejected, step, token, signature)) continue;
+        if (!session.active) return;
+        if (isDisabled(findContinue())) { pauseDisabledButton(); return; }
         if (session.active) status('paused', 'Continue did not change the step. Check the page, then resume.');
         return;
       }

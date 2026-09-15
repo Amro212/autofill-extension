@@ -8,6 +8,7 @@ import { rememberAnswer, recallAnswer } from '../src/memory.js';
 import { classifyPage } from '../src/pageClassifier.js';
 import { inspectValidation } from '../src/validation.js';
 import { findContinue } from '../src/navigation.js';
+import { pageSignature } from '../src/navigation.js';
 import { createApplicationEngine } from '../src/application.js';
 import { scanFormFields } from '../src/fields/scanner.js';
 import { saveProfile, saveSettings } from '../src/storage.js';
@@ -319,4 +320,136 @@ test('unexpected step change during a field action pauses instead of filling the
   assert.equal(engine.session.status, 'paused');
   assert.match(engine.session.reason, /Page changed while filling/);
   engine.destroy();
+});
+
+test('button selection text in aria-labelledby does not change the question or step', () => {
+  render('<h3>Application Questions</h3><label id="question" for="answer">Are you authorized?</label><button id="answer" type="button" aria-haspopup="listbox" aria-labelledby="question answer">Select One</button>');
+  const before = scanFormFields();
+  assert.equal(before[0].label, 'Are you authorized?');
+  document.querySelector('button').textContent = 'Yes';
+  const after = scanFormFields();
+  assert.equal(after[0].label, before[0].label);
+  assert.equal(pageSignature(after), pageSignature(before));
+});
+
+test('header language/settings controls stay outside applicant fields', () => {
+  document.body.insertAdjacentHTML('afterbegin', '<header><button id="language" aria-haspopup="listbox">English</button></header>');
+  render(input());
+  assert.deepEqual(scanFormFields().map(f => f.id), ['name']);
+});
+
+test('same-URL steps with reused fields are distinguished by h3 heading', () => {
+  render(`<h3>My Information</h3>${input()}`);
+  const before = pageSignature(scanFormFields());
+  document.querySelector('h3').textContent = 'My Experience';
+  assert.notEqual(pageSignature(scanFormFields()), before);
+});
+
+test('Workday-style self-labelled button fills remaining fields and auto-continues to next same-URL step', async () => {
+  render('<h3>Application Questions</h3><label id="question" for="answer">Are you authorized?</label><button id="answer" type="button" aria-haspopup="listbox" aria-controls="options" aria-labelledby="question answer">Select One</button>' + input('detail', 'Relevant experience') + '<button id="next" type="button">Save and Continue</button>');
+  const button = document.querySelector('#answer');
+  button.onclick = () => {
+    document.querySelector('#options')?.remove();
+    const menu = document.createElement('div'); menu.id = 'options'; menu.setAttribute('role', 'listbox');
+    menu.innerHTML = '<div role="option">Yes</div><div role="option">No</div>';
+    document.querySelector('main').append(menu);
+    menu.querySelectorAll('[role=option]').forEach(option => option.onclick = () => { button.textContent = option.textContent; menu.remove(); });
+  };
+  document.querySelector('#next').onclick = () => {
+    assert.equal(document.querySelector('#detail').value, 'Grounded response');
+    render(`<h3>Next step</h3>${input('email', 'Email')}<button type="button">Review</button>`);
+    document.querySelector('button').onclick = () => render('<h1>Review application</h1>');
+  };
+  let calls = 0;
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: async fields => {
+    calls++;
+    return { answers: fields.map(f => ({ fieldId: f.fieldId, value: f.fieldId === 'answer' ? 'Yes' : f.fieldId === 'email' ? 'test@example.com' : 'Grounded response' })) };
+  } });
+  await engine.start(job());
+  assert.equal(engine.session.status, 'review');
+  assert.equal(calls, 2);
+  engine.destroy();
+});
+
+test('slow save disables Continue temporarily, then next step fills automatically', async () => {
+  render(`${input()}<button type="button">Save and Continue</button>`);
+  let clicks = 0, requests = 0, load;
+  document.querySelector('button').onclick = e => {
+    clicks++; e.target.disabled = true;
+    // Reproduce a save taking longer than the previous fixed post-click delay.
+    load = setTimeout(() => {
+      render(`<h3>Next step</h3>${input('email', 'Email')}<button type="button">Review</button>`);
+      document.querySelector('button').onclick = () => render('<h1>Review application</h1>');
+    }, 100);
+  };
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 10, navigationTimeoutMs: 1000, answer: async fields => {
+    requests++; return { answers: fields.map(f => ({ fieldId: f.fieldId, value: 'Applicant' })) };
+  } });
+  try {
+    await engine.start(job());
+    assert.equal(engine.session.status, 'review');
+    assert.equal(requests, 2);
+    assert.equal(clicks, 1);
+    assert.equal(engine.session.errors.length, 0);
+  } finally { clearTimeout(load); engine.destroy(); }
+});
+
+test('Continue enabling after field validation is awaited without AI repair', async () => {
+  render(`${input()}<button type="button" disabled>Continue</button>`);
+  let enable, requests = 0;
+  document.querySelector('input').oninput = () => { enable = setTimeout(() => { document.querySelector('button').disabled = false; }, 100); };
+  document.querySelector('button').onclick = () => render('<h1>Review application</h1>');
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 10, navigationTimeoutMs: 1000, answer: async () => { requests++; return { answers: [{ fieldId: 'name', value: 'Applicant' }] }; } });
+  try {
+    await engine.start(job());
+    assert.equal(engine.session.status, 'review');
+    assert.equal(requests, 1);
+    assert.equal(engine.session.errors.length, 0);
+  } finally { clearTimeout(enable); engine.destroy(); }
+});
+
+test('permanently disabled Continue times out without clicks or repair budget consumption', async () => {
+  render(`${input()}<button disabled>Continue</button>`);
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 10, navigationTimeoutMs: 80, answer: async () => ({ answers: [{ fieldId: 'name', value: 'Applicant' }] }) });
+  await engine.start(job());
+  assert.equal(engine.session.status, 'paused');
+  assert.match(engine.session.reason, /page.*button.*disabled/i);
+  assert.equal(Object.values(engine.session.steps)[0].repairs, 0);
+  assert.equal(Object.values(engine.session.steps)[0].clicks, 0);
+  engine.destroy();
+});
+
+test('Pause interrupts navigation waiting without another click or AI call', async () => {
+  render(`${input()}<button>Continue</button>`);
+  let clicks = 0, requests = 0, stop;
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 10, navigationTimeoutMs: 1000, answer: async () => { requests++; return { answers: [{ fieldId: 'name', value: 'Applicant' }] }; } });
+  document.querySelector('button').onclick = e => {
+    clicks++; e.target.disabled = true;
+    stop = setTimeout(() => engine.pause(), 20);
+  };
+  try {
+    await engine.start(job());
+    assert.equal(engine.session.reason, 'Paused by user.');
+    assert.equal(clicks, 1);
+    assert.equal(requests, 1);
+  } finally { clearTimeout(stop); engine.destroy(); }
+});
+
+test('next page fields wait for aria-busy rendering to finish', async () => {
+  render(`${input()}<button>Continue</button>`);
+  let finish, calls = 0;
+  document.querySelector('button').onclick = () => {
+    render('<section aria-busy="true"><h3>Next step</h3><span>Loading</span></section>');
+    finish = setTimeout(() => {
+      render(`<h3>Next step</h3>${input('email', 'Email')}<button>Review</button>`);
+      document.querySelector('button').onclick = () => render('<h1>Review application</h1>');
+    }, 150);
+  };
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 10, navigationTimeoutMs: 1000, answer: async fields => { calls++; return { answers: fields.map(f => ({ fieldId: f.fieldId, value: 'Applicant' })) }; } });
+  try {
+    await engine.start(job());
+    assert.equal(engine.session.status, 'review');
+    assert.equal(calls, 2);
+    assert.equal(engine.session.history.length, 2);
+  } finally { clearTimeout(finish); engine.destroy(); }
 });
