@@ -19,7 +19,12 @@ const empty = field => field.type === 'checkbox' ? !field.element.checked : !Str
 const runnable = new Set(['running', 'captcha', 'waiting']);
 
 export function createApplicationEngine({ answer = generateAutofillAnswers, onChange = () => {}, settleMs = 180, transitionMs = 1200, navigationTimeoutMs = transitionMs === 0 ? 0 : 10000 } = {}) {
-  let session = null, busy = false, generation = 0, timer = null, observer = null, interval = null;
+  let session = null, busy = false, generation = 0, timer = null, observer = null, interval = null, cancelDelay = null;
+  const delay = ms => new Promise(resolve => {
+    let t = null;
+    cancelDelay = () => { clearTimeout(t); cancelDelay = null; resolve(); };
+    t = setTimeout(() => { cancelDelay = null; resolve(); }, ms);
+  });
   const results = new Map();
   let lastEmission = '';
   function validation(fields = scanFormFields(), control = null) {
@@ -269,8 +274,14 @@ export function createApplicationEngine({ answer = generateAutofillAnswers, onCh
       status('running', 'Starting application workflow.');
       await tick();
     },
-    pause() { generation++; if (session) status('paused', 'Paused by user.'); },
+    pause() {
+      generation++;
+      clearTimeout(timer);
+      cancelDelay?.();
+      busy = false;
+      if (session) status('paused', 'Paused by user.');
+    },
     tick,
-    destroy() { generation++; clearTimeout(timer); clearInterval(interval); observer?.disconnect(); },
+    destroy() { generation++; clearTimeout(timer); cancelDelay?.(); clearInterval(interval); observer?.disconnect(); },
   };
 }

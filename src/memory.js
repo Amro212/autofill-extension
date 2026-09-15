@@ -8,7 +8,7 @@ const common = field => /^(full name|first name|last name|email|email address|ph
 const compatible = (field, answer) => answer && (!field.options?.length || field.type === 'checkbox' || field.options.some(o => String(o.value) === String(answer.value) || String(o.label) === String(answer.value)));
 export function rememberAnswer(session, field, answer) {
   const entry = { value: answer.value, inferred: Boolean(answer.inferred), profileKey: profileKey(), label: field.label, updatedAt: new Date().toISOString() };
-  session.answers[questionKey(field)] = entry;
+  if (session?.answers) session.answers[questionKey(field)] = entry;
   if (common(field) && !entry.inferred) {
     const memory = gmGet(STORAGE_KEYS.MEMORY, {});
     memory[questionKey(field)] = entry;

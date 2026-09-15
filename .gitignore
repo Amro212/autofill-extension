@@ -6,3 +6,4 @@ dist/*
 .env
 .agents/
 .playwright-mcp/
+packages/

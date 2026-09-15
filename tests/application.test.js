@@ -453,3 +453,44 @@ test('next page fields wait for aria-busy rendering to finish', async () => {
     assert.equal(engine.session.history.length, 2);
   } finally { clearTimeout(finish); engine.destroy(); }
 });
+
+test('Pause acts as a hard quit without tampering with filled fields or forgetting memory', async () => {
+  render(`${input('name', 'Full name')}${input('phone', 'Phone')}<button>Continue</button>`);
+  let requests = 0;
+  const engine = createApplicationEngine({
+    settleMs: 50,
+    answer: async () => {
+      requests++;
+      return {
+        answers: [
+          { fieldId: 'name', value: 'Jane Doe' },
+          { fieldId: 'phone', value: '555-123-4567' },
+        ],
+      };
+    },
+  });
+
+  const startPromise = engine.start(job());
+  let checks = 0;
+  while ((!document.querySelector('#name').value || Object.keys(engine.session.answers).length === 0) && checks < 50) {
+    await new Promise(r => setTimeout(r, 10));
+    checks++;
+  }
+  assert.equal(document.querySelector('#name').value, 'Jane Doe');
+
+  engine.pause();
+  await startPromise;
+
+  assert.equal(engine.session.status, 'paused');
+  assert.equal(engine.session.reason, 'Paused by user.');
+  assert.equal(document.querySelector('#name').value, 'Jane Doe');
+  const rememberedKeys = Object.keys(engine.session.answers);
+  assert.ok(rememberedKeys.length > 0, 'Remembered answer exists in session');
+  assert.ok(rememberedKeys.some(k => engine.session.answers[k].value === 'Jane Doe'));
+  const step = Object.values(engine.session.steps)[0];
+  assert.ok(step.answers.name, 'Step answers include name');
+  assert.equal(step.answers.name.value, 'Jane Doe');
+
+  engine.destroy();
+});
+

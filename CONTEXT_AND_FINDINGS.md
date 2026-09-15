@@ -6,6 +6,28 @@ This file tracks user-reported findings, platform bugs, audit analyses, and code
 
 ## Findings & Bug Reports
 
+### Entry: 2026-09-15 — Embedded Greenhouse application reports 0 detected fields (Cross-Origin iframe)
+
+- **Phase / Environment**: Phase 3 / ATS Integration, AlayaCare Careers (`https://alayacare.com/open-positions/?gh_jid=8811313002`). Job Copilot v0.3.5.
+- **Evidence / Symptoms**: User screenshot shows an open Greenhouse job application embedded inside `alayacare.com`. Job Copilot floating panel mounts on the top-level page and displays `PAGE FORM FIELDS: 0 detected`, preventing autofill.
+- **Audit & Root Cause Analysis**:
+  1. AlayaCare embeds Greenhouse via `<div id="grnhse_app">` loading Greenhouse's official embed script `https://boards.greenhouse.io/embed/job_board/js?for=alayacare`.
+  2. Greenhouse's embed script dynamically creates an iframe: `<iframe id="grnhse_iframe" src="https://job-boards.greenhouse.io/embed/job_app?for=alayacare&token=8811313002"></iframe>`.
+  3. All application form fields (`first_name`, `last_name`, `email`, custom questions, comboboxes) live entirely inside the `job-boards.greenhouse.io` iframe document.
+  4. Top-level window (`alayacare.com`) cannot inspect `iframe.contentDocument` due to the browser's Same-Origin Policy.
+  5. In [src/main.js](file:///c:/VScode/Autofill-Ext/src/main.js) (lines 28–30):
+     ```javascript
+     if (window.self !== window.top) {
+       return;
+     }
+     ```
+     The userscript explicitly terminates execution when running inside any subframe (`window.self !== window.top`).
+  6. Consequently:
+     - The instance running in the iframe immediately exits and runs neither scanners, listeners, nor fillers.
+     - The instance running in `window.top` mounts the UI panel and scans only the outer `alayacare.com` DOM, finding 0 form fields.
+- **Target Phase**: Cross-frame communication & embedded ATS architecture (Phase 4 ATS Hardening or Phase 3 cross-origin frame extension).
+
+
 ### Entry: 2026-09-15 — Continue temporarily disabled during Workday transition
 
 - **Phase / Environment**: Phase 3, Cisco Workday v0.3.3. Screenshot confirms Auto Continue ON. User observed automatic first-to-second-page progression followed by pause.
@@ -67,6 +89,72 @@ This file tracks user-reported findings, platform bugs, audit analyses, and code
 ---
 
 ## Turn Change Log
+
+### Turn: 2026-09-15 — Single-page autofill pause/stop button & hard-quit task commands
+
+- **User request**: Add a pause/stop button beside the single form page "Autofill This Page" button. Both pause buttons (single-page and multi-step) must act as hard quit task commands WITHOUT tampering with the progress made so far or forgetting memory and fields already filled.
+- **Changed**:
+  - `src/ui.js`:
+    - Added `#jc-pause-autofill-btn` beside `#jc-autofill-btn` in the Page Form Fields card, dynamically enabled when autofill is active with pulsing amber active styling (`.jc-btn-pause-active`).
+    - Styled multi-step `#jc-pause-application` with `.jc-btn-pause-active` during running state.
+    - Implemented interruptible autofill flow with `autofillSleep` and `cancelAutofillDelay` for instantaneous wake-up and exit on pause.
+    - Implemented `stopAutofillFlow()` that increments `autofillGeneration`, resolves active delays, halts field loops immediately, and leaves DOM fields and `fieldResultsCache` completely intact.
+    - Added answer recording (`rememberAnswer`, `saveSession`) during single-page autofill so verified fields are safely persisted into session memory and global profile memory without waiting for full completion.
+    - Inter-wired both pause buttons so clicking either button immediately halts any running autofill or workflow task.
+  - `src/application.js`:
+    - Updated `delay` to support immediate cancellation via `cancelDelay`.
+    - Made `pause()` cancel pending delays, clear timers, reset `busy = false`, and transition cleanly to `'paused'` while strictly keeping `session.answers`, `session.steps`, `session.history`, and all DOM inputs intact.
+  - `src/memory.js`:
+    - Made `rememberAnswer` safely tolerate null/undefined `session` objects, ensuring global memory writes for common fields work seamlessly even without an active application session.
+  - `tests/application.test.js` & `tests/panel.test.js`:
+    - Added regression test asserting that Pause acts as a hard quit during field filling, leaves DOM values in place, and preserves session memory and step answers.
+    - Asserted presence and mount of `#jc-pause-autofill-btn` in the Shadow DOM UI panel.
+- **Tests / Build**:
+  - Full test suite passed (67/67 tests, 0 failures).
+  - Built `dist/job-copilot.user.js` successfully (v0.3.7).
+- **Status / Next**: Ready for testing both single-page and multi-step pause flows in browser.
+
+### Turn: 2026-09-15 — Multi-step application UI polish & status redesign
+
+- **User request**: Polish Phase 3 UI: add a clear progress bar and "done" badge/pill when complete, remove listing URL link, show only useful metrics for the applicant (steps completed, fields answered), rename "Phase 3 · Application Workflow" to clearly state it's for multi-step applications, enhance overall visual aesthetic.
+- **Changed**:
+  - `src/ui.js`:
+    - Renamed section to "Multi-Step Application".
+    - Added color-coded status badges: `✓ Done — Ready for Review` / `✓ Submitted` (emerald green badge with subtle glow), `● Running` (pulsing sky blue), `⏸ Paused` / `⏸ CAPTCHA` / `⏸ Manual Step Required` (amber warning), and `Not Started` (slate idle).
+    - Added left-accent border to `.jc-workflow-card` that transitions dynamically based on state (`wf-running`, `wf-paused`, `wf-done`).
+    - Added a step progress bar (`.jc-wf-step-bar`) with pulse animation during execution and full emerald green bar on completion.
+    - Replaced raw session ID and technical internals with applicant-centric metrics: "X steps completed" and "Y fields answered".
+    - Removed raw listing URL to reduce visual noise.
+    - Improved formatting for status reason and error messages.
+- **Tests / Build**:
+  - Full test suite passed (66/66 tests, 0 failures).
+  - Built `dist/job-copilot.user.js` successfully (v0.3.6).
+- **Status / Next**: Ready for user testing on multi-step flows.
+
+### Turn: 2026-09-15 — Systematic debugging of embedded Greenhouse cross-origin iframe (0 detected fields)
+
+- **User request**: Investigate edge case on `https://alayacare.com/open-positions/?gh_jid=8811313002` where Job Copilot reports "0 detected" fields on an apparent Greenhouse embedded application. Apply `/systematic-debugging`.
+- **Investigation / Audit**:
+  1. Inspected live page DOM and network resources. AlayaCare mounts Greenhouse via `<div id="grnhse_app">` using Greenhouse's official embed script `https://boards.greenhouse.io/embed/job_board/js?for=alayacare`.
+  2. The embed script inserts `<iframe id="grnhse_iframe" src="https://job-boards.greenhouse.io/embed/job_app?for=alayacare&token=8811313002">`.
+  3. All 17 form fields (name, email, location, phone, custom questions) are located inside `job-boards.greenhouse.io`, completely isolated from `alayacare.com` by the browser Same-Origin Policy.
+  4. Verified via JSDOM simulation of the Greenhouse embed document that `scanFormFields` accurately detects all 17 fields with proper labels and types when executed in the iframe's context.
+  5. Isolated root cause to [src/main.js](file:///c:/VScode/Autofill-Ext/src/main.js) lines 28–30:
+     ```javascript
+     if (window.self !== window.top) {
+       return;
+     }
+     ```
+     This check was originally added to satisfy Rule 7 (Single UI Host) to avoid mounting floating UI panels inside ads or hidden frames. However, by exiting immediately, the userscript completely deactivates inside any child frame. As a result, no scanner, listener, or filler runs in the Greenhouse iframe, while the top-level UI on `alayacare.com` cannot reach inside the cross-origin iframe.
+- **Next Steps & Options**: Propose architectural options (cross-frame `postMessage` protocol vs. iframe detection with direct-link detachment) to the user for discussion.
+
+
+### Turn: 2026-09-15 — Ignore obsolete packages directory
+
+- **User request**: Safely ignore the untracked `packages/` directory if safe.
+- **Audit**: Verified that `packages/` contains only legacy build outputs (`dist/`) and `node_modules/` left over from the earlier monorepo architecture prior to commit `97d5bd8`. There are no tracked files or source files in `packages/`, and no code in the active userscript codebase references it.
+- **Changed**: Added `packages/` to `.gitignore`.
+- **Status / Next**: All 66 tests pass. The local `packages/` folder can also be deleted if desired to free up disk space.
 
 ### Turn: 2026-09-15 — Human narrative voice in AI prompts
 

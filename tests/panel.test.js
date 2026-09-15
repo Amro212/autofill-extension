@@ -24,6 +24,8 @@ test('bundled panel mounts once and captures a job using GM storage', async () =
     assert.match(root.shadowRoot.textContent, /Company unknown \(uncertain\)/);
     assert.equal(storage.get('jc:job').applicationUrl, 'https://example.com/apply/42');
     assert.equal(storage.get('jc:sessions').length, 1);
+    assert.ok(root.shadowRoot.querySelector('#jc-pause-autofill-btn'), 'Pause autofill button is present');
+    assert.ok(root.shadowRoot.querySelector('#jc-pause-application'), 'Pause application button is present');
     root.shadowRoot.querySelector('[data-tab=settings]').click();
     assert.equal(root.shadowRoot.querySelector('#jc-api-key-input').value, '');
     assert.equal(root.shadowRoot.innerHTML.includes('fixture-stored-secret'), false);

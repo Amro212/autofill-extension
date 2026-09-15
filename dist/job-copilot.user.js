@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Job Copilot
 // @namespace    https://github.com/Amro212/autofill-extension
-// @version      0.3.5
+// @version      0.3.7
 // @description  Job Copilot — Tampermonkey userscript for AI job applications
 // @author       Job Copilot Team
 // @updateURL    https://raw.githubusercontent.com/Amro212/autofill-extension/main/dist/job-copilot.user.js
@@ -21,7 +21,7 @@
 
 (() => {
   // src/constants.js
-  var APP_VERSION = true ? "0.3.5" : "0.3.0";
+  var APP_VERSION = true ? "0.3.7" : "0.3.0";
   var APP_NAME = "Job Copilot";
   var STORAGE_KEYS = {
     SETTINGS: "jc:settings",
@@ -2038,7 +2038,7 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
   var compatible = (field, answer) => answer && (!field.options?.length || field.type === "checkbox" || field.options.some((o) => String(o.value) === String(answer.value) || String(o.label) === String(answer.value)));
   function rememberAnswer(session, field, answer) {
     const entry = { value: answer.value, inferred: Boolean(answer.inferred), profileKey: profileKey(), label: field.label, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
-    session.answers[questionKey(field)] = entry;
+    if (session?.answers) session.answers[questionKey(field)] = entry;
     if (common(field) && !entry.inferred) {
       const memory = gmGet(STORAGE_KEYS.MEMORY, {});
       memory[questionKey(field)] = entry;
@@ -2051,13 +2051,24 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
   }
 
   // src/application.js
-  var delay2 = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   var scanFormFields2 = () => scanFormFields().filter((f) => isVisible2(f.element) && !f.element.disabled && !f.element.readOnly && f.element.type !== "file");
   var empty = (field) => field.type === "checkbox" ? !field.element.checked : !String(field.currentValue ?? "").trim();
   var runnable = /* @__PURE__ */ new Set(["running", "captcha", "waiting"]);
   function createApplicationEngine({ answer = generateAutofillAnswers, onChange = () => {
   }, settleMs = 180, transitionMs = 1200, navigationTimeoutMs = transitionMs === 0 ? 0 : 1e4 } = {}) {
-    let session = null, busy = false, generation = 0, timer = null, observer = null, interval = null;
+    let session = null, busy = false, generation = 0, timer = null, observer = null, interval = null, cancelDelay = null;
+    const delay2 = (ms) => new Promise((resolve) => {
+      let t = null;
+      cancelDelay = () => {
+        clearTimeout(t);
+        cancelDelay = null;
+        resolve();
+      };
+      t = setTimeout(() => {
+        cancelDelay = null;
+        resolve();
+      }, ms);
+    });
     const results = /* @__PURE__ */ new Map();
     let lastEmission = "";
     function validation(fields = scanFormFields2(), control = null) {
@@ -2353,12 +2364,16 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
       },
       pause() {
         generation++;
+        clearTimeout(timer);
+        cancelDelay?.();
+        busy = false;
         if (session) status("paused", "Paused by user.");
       },
       tick,
       destroy() {
         generation++;
         clearTimeout(timer);
+        cancelDelay?.();
         clearInterval(interval);
         observer?.disconnect();
       }
@@ -2955,6 +2970,179 @@ input:checked + .jc-slider:before {
   flex-direction: column;
   gap: 12px;
 }
+
+.jc-workflow-card {
+  background: rgba(30, 41, 59, 0.4);
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 14px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-left: 3px solid #475569;
+  transition: border-color 0.3s ease;
+}
+
+.jc-workflow-card.wf-running {
+  border-left-color: #38bdf8;
+}
+
+.jc-workflow-card.wf-paused {
+  border-left-color: #f59e0b;
+}
+
+.jc-workflow-card.wf-done {
+  border-left-color: #10b981;
+}
+
+.jc-wf-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.jc-wf-badge-running {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  animation: jc-pulse-badge 1.8s ease-in-out infinite;
+}
+
+.jc-wf-badge-paused {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.jc-wf-badge-done {
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  font-size: 12px;
+  padding: 4px 12px;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.15);
+}
+
+.jc-wf-badge-idle {
+  background: rgba(100, 116, 139, 0.15);
+  color: #94a3b8;
+  border: 1px solid rgba(100, 116, 139, 0.3);
+}
+
+@keyframes jc-pulse-badge {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.jc-wf-job-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f1f5f9;
+  line-height: 1.3;
+}
+
+.jc-wf-job-company {
+  font-size: 12px;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.jc-wf-reason {
+  font-size: 12px;
+  color: #cbd5e1;
+  line-height: 1.4;
+  padding: 6px 8px;
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 6px;
+  border-left: 2px solid #475569;
+}
+
+.jc-wf-reason.wf-error {
+  border-left-color: #f59e0b;
+  color: #fde68a;
+}
+
+.jc-wf-metrics {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+}
+
+.jc-wf-metric {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #94a3b8;
+}
+
+.jc-wf-metric strong {
+  color: #e2e8f0;
+  font-weight: 700;
+}
+
+.jc-wf-step-bar-container {
+  width: 100%;
+  height: 4px;
+  background: #1e293b;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.jc-wf-step-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #38bdf8, #2563eb);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+  min-width: 0;
+}
+
+.jc-wf-step-bar.wf-pulse {
+  animation: jc-bar-pulse 1.5s ease-in-out infinite;
+}
+
+.jc-wf-step-bar.wf-done {
+  background: linear-gradient(90deg, #34d399, #10b981);
+}
+
+@keyframes jc-bar-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.jc-wf-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.jc-wf-actions .jc-btn {
+  flex: 1;
+  padding: 10px 14px;
+  font-size: 12px;
+}
+
+.jc-wf-actions .jc-btn:first-child {
+  flex: 0 0 auto;
+}
+
+.jc-btn-pause-active {
+  background: rgba(245, 158, 11, 0.18) !important;
+  color: #fbbf24 !important;
+  border-color: rgba(245, 158, 11, 0.45) !important;
+  animation: jc-pulse-badge 1.8s ease-in-out infinite;
+}
+
+.jc-btn-pause-active:hover {
+  background: rgba(245, 158, 11, 0.3) !important;
+  color: #fef3c7 !important;
+  border-color: rgba(245, 158, 11, 0.6) !important;
+}
 `;
   function escapeHtml(str) {
     if (str === null || str === void 0) return "";
@@ -3025,9 +3213,37 @@ input:checked + .jc-slider:before {
       logger.error("Error scanning fields:", err);
     }
   }
+  var autofillGeneration = 0;
+  var cancelAutofillDelay = null;
+  function autofillSleep(ms) {
+    return new Promise((resolve) => {
+      let timer = null;
+      cancelAutofillDelay = () => {
+        clearTimeout(timer);
+        cancelAutofillDelay = null;
+        resolve();
+      };
+      timer = setTimeout(() => {
+        cancelAutofillDelay = null;
+        resolve();
+      }, ms);
+    });
+  }
+  function stopAutofillFlow(reason = "Autofill paused by user. Progress and filled fields preserved.") {
+    if (!isAutofilling) return;
+    autofillGeneration++;
+    cancelAutofillDelay?.();
+    isAutofilling = false;
+    autofillProgress.statusText = reason;
+    logger.info(`Single-page autofill stopped: ${reason}`);
+    resumeFormObserver();
+    refreshDetectedFields();
+    updatePanelDOM();
+  }
   async function executeAutofillFlow() {
     if (isAutofilling || applicationEngine?.busy) return;
     applicationEngine?.pause();
+    const token = ++autofillGeneration;
     const runUrl = window.location.href;
     const page = classifyPage();
     if (["captcha", "boundary", "confirmation"].includes(page.type)) {
@@ -3062,26 +3278,31 @@ input:checked + .jc-slider:before {
         updatePanelDOM();
         return;
       }
+      if (token !== autofillGeneration) return;
       autofillProgress.total = targetFields.length;
       autofillProgress.statusText = "Harvesting combobox options...";
       updatePanelDOM();
       await harvestComboboxOptions(targetFields);
+      if (token !== autofillGeneration) return;
       autofillProgress.statusText = `Generating answers with AI (${settings.model})...`;
       updatePanelDOM();
       const normalized = normalizeFieldsForAI(targetFields, { overwriteExisting: overwrite });
       let aiResponse = await generateAutofillAnswers(normalized);
+      if (token !== autofillGeneration) return;
       if (window.location.href !== runUrl) throw new Error("Page changed during autofill. Inspect the current step before retrying.");
       if (["captcha", "boundary", "confirmation"].includes(classifyPage().type)) throw new Error(classifyPage().reason);
       if (aiResponse.answers.some((answer) => answer.searchQuery)) {
         autofillProgress.statusText = "Searching for missing combobox options...";
         updatePanelDOM();
         aiResponse = await resolveComboboxSearchAnswers(targetFields, aiResponse);
+        if (token !== autofillGeneration) return;
       }
       const answersMap = new Map(aiResponse.answers.map((a) => [a.fieldId, a]));
       logger.info(`Starting progressive fill of ${targetFields.length} fields...`);
       let filledCount = 0;
       let failedCount = 0;
       for (let i = 0; i < targetFields.length; i++) {
+        if (token !== autofillGeneration) break;
         if (window.location.href !== runUrl) throw new Error("Page changed during autofill. Inspect the current step before retrying.");
         if (["captcha", "boundary", "confirmation"].includes(classifyPage().type)) throw new Error(classifyPage().reason);
         const field = targetFields[i];
@@ -3089,6 +3310,7 @@ input:checked + .jc-slider:before {
         autofillProgress.statusText = `Filling ${i + 1} of ${targetFields.length}: "${field.label}"`;
         updatePanelDOM();
         try {
+          if (token !== autofillGeneration) break;
           field.element = resolveLiveElement(field);
           const answer = answersMap.get(field.id);
           if (!answer || answer.value === "" || answer.value === null || answer.value === void 0) {
@@ -3110,12 +3332,16 @@ input:checked + .jc-slider:before {
           }
           scrollToField(field.element);
           highlightActiveField(field.element);
-          await new Promise((r) => setTimeout(r, 100));
+          await autofillSleep(100);
+          if (token !== autofillGeneration) break;
           const didFill = await fillField(field, answer.value);
+          if (token !== autofillGeneration) break;
           const settleDelay = field.type === "combobox" ? 250 : 80;
-          await new Promise((r) => setTimeout(r, settleDelay));
+          await autofillSleep(settleDelay);
+          if (token !== autofillGeneration) break;
           field.element = resolveLiveElement(field);
           const verification = didFill ? await verifyField(field, answer.value) : { verified: false, actualValue: "", error: "No exact option was selected or the field rejected the value" };
+          if (token !== autofillGeneration) break;
           if (verification.verified) {
             highlightVerifiedField(field.element);
             filledCount++;
@@ -3124,6 +3350,12 @@ input:checked + .jc-slider:before {
               value: verification.actualValue || answer.value,
               inferred: answer.inferred
             });
+            if (applicationEngine?.session) {
+              rememberAnswer(applicationEngine.session, field, answer);
+              saveSession(applicationEngine.session);
+            } else {
+              rememberAnswer(null, field, answer);
+            }
           } else {
             highlightFailedField(field.element);
             failedCount++;
@@ -3135,6 +3367,7 @@ input:checked + .jc-slider:before {
             logger.warn(`Verification failed for "${field.label}": ${verification.error}`);
           }
         } catch (fieldErr) {
+          if (token !== autofillGeneration) break;
           logger.error(`Error filling field "${field.label}":`, fieldErr);
           failedCount++;
           fieldResultsCache.set(field.id, {
@@ -3148,16 +3381,20 @@ input:checked + .jc-slider:before {
           }
         }
       }
+      if (token !== autofillGeneration) return;
       autofillProgress.statusText = `Autofill completed! (${filledCount} filled, ${failedCount} failed)`;
       logger.info(`Autofill finished: ${filledCount} verified, ${failedCount} failed out of ${targetFields.length} fields.`);
     } catch (err) {
+      if (token !== autofillGeneration) return;
       logger.error("Autofill execution failed:", err);
       autofillProgress.statusText = `Error: ${err.message}`;
     } finally {
-      isAutofilling = false;
-      resumeFormObserver();
-      refreshDetectedFields();
-      updatePanelDOM();
+      if (token === autofillGeneration) {
+        isAutofilling = false;
+        resumeFormObserver();
+        refreshDetectedFields();
+        updatePanelDOM();
+      }
     }
   }
   function openRewriteModal(field) {
@@ -3219,19 +3456,65 @@ input:checked + .jc-slider:before {
     const fieldCount = detectedFieldsCache.length;
     const session = applicationState?.session;
     const job = session?.job;
-    const workflowHtml = `<div class="jc-card">
-    <span class="jc-card-title">Phase 3 \xB7 Application Workflow</span>
-    <div style="font-size:12px;white-space:pre-wrap">${escapeHtml(job ? `${job.title}
-${job.company || "Company unknown"}${job.companyUncertain ? " (uncertain)" : ""}${job.location ? "\n" + job.location : ""}` : "Capture a job listing, then start on its application page.")}</div>
-    ${job ? `<div style="font-size:11px;overflow-wrap:anywhere">${escapeHtml(job.listingUrl)}</div>` : ""}
-    <div role="status" style="font-size:12px">${escapeHtml(session ? `${session.status}: ${session.reason}` : "No active session.")}</div>
-    ${session ? `<div style="font-size:11px">Session ${escapeHtml(session.id.slice(0, 8))} \xB7 ${session.history.length} steps \xB7 ${Object.keys(session.answers).length} remembered answers</div>` : ""}
+    const wfStatus = session?.status || "";
+    const wfIsRunning = wfStatus === "running";
+    const wfIsDone = ["review", "confirmation"].includes(wfStatus);
+    const wfIsPaused = wfStatus === "paused";
+    const wfIsWaiting = ["captcha", "boundary"].includes(wfStatus);
+    const wfCardClass = wfIsRunning ? "wf-running" : wfIsDone ? "wf-done" : wfIsPaused || wfIsWaiting ? "wf-paused" : "";
+    let wfBadgeHtml;
+    if (wfIsDone) {
+      const doneLabel = wfStatus === "confirmation" ? "\u2713 Submitted" : "\u2713 Done \u2014 Ready for Review";
+      wfBadgeHtml = `<span class="jc-wf-badge jc-wf-badge-done">${doneLabel}</span>`;
+    } else if (wfIsRunning) {
+      wfBadgeHtml = `<span class="jc-wf-badge jc-wf-badge-running">\u25CF Running</span>`;
+    } else if (wfIsWaiting) {
+      const waitLabel = wfStatus === "captcha" ? "\u23F8 CAPTCHA" : "\u23F8 Manual Step Required";
+      wfBadgeHtml = `<span class="jc-wf-badge jc-wf-badge-paused">${waitLabel}</span>`;
+    } else if (wfIsPaused) {
+      wfBadgeHtml = `<span class="jc-wf-badge jc-wf-badge-paused">\u23F8 Paused</span>`;
+    } else {
+      wfBadgeHtml = `<span class="jc-wf-badge jc-wf-badge-idle">Not Started</span>`;
+    }
+    const stepsCompleted = session ? session.history.length : 0;
+    const fieldsAnswered = session ? Object.keys(session.answers).length : 0;
+    const stepBarPercent = stepsCompleted > 0 ? Math.min(stepsCompleted * 25, 100) : 0;
+    const stepBarClass = wfIsDone ? "wf-done" : wfIsRunning ? "wf-pulse" : "";
+    let wfReasonHtml = "";
+    if (session && session.reason) {
+      const isErr = wfIsPaused || wfIsWaiting;
+      wfReasonHtml = `<div class="jc-wf-reason ${isErr ? "wf-error" : ""}">${escapeHtml(session.reason)}</div>`;
+    } else if (!session) {
+      wfReasonHtml = `<div style="font-size:12px;color:#94a3b8">Capture a job listing, then start on its application page.</div>`;
+    }
+    let wfJobHtml = "";
+    if (job) {
+      const companyText = (job.company || "Company unknown") + (job.companyUncertain ? " (uncertain)" : "");
+      wfJobHtml = `<div>
+      <div class="jc-wf-job-title">${escapeHtml(job.title)}</div>
+      <div class="jc-wf-job-company">${escapeHtml(companyText)}${job.location ? ` \xB7 ${escapeHtml(job.location)}` : ""}</div>
+    </div>`;
+    }
+    const lastError = session?.errors?.length ? session.errors.at(-1).message : "";
+    const wfErrorHtml = lastError && !session.reason?.includes(lastError) ? `<div style="font-size:11px;color:#fbbf24;padding:4px 8px;background:rgba(245,158,11,0.08);border-radius:6px">\u26A0 ${escapeHtml(lastError)}</div>` : "";
+    const workflowHtml = `<div class="jc-workflow-card ${wfCardClass}">
     <div class="jc-row">
+      <span class="jc-card-title">Multi-Step Application</span>
+      ${wfBadgeHtml}
+    </div>
+    ${wfJobHtml}
+    ${session ? `<div class="jc-wf-step-bar-container"><div class="jc-wf-step-bar ${stepBarClass}" style="width:${stepBarPercent}%"></div></div>` : ""}
+    ${session ? `<div class="jc-wf-metrics">
+      <div class="jc-wf-metric">\u{1F4CB} <strong>${stepsCompleted}</strong> step${stepsCompleted !== 1 ? "s" : ""} completed</div>
+      <div class="jc-wf-metric">\u270F\uFE0F <strong>${fieldsAnswered}</strong> field${fieldsAnswered !== 1 ? "s" : ""} answered</div>
+    </div>` : ""}
+    ${wfReasonHtml}
+    ${wfErrorHtml}
+    <div class="jc-wf-actions">
       <button class="jc-btn jc-btn-secondary" id="jc-capture-job" ${isAutofilling || applicationEngine?.busy ? "disabled" : ""}>Capture Job</button>
       <button class="jc-btn" id="jc-start-application" ${isAutofilling || applicationEngine?.busy ? "disabled" : ""}>${session ? "Start / Resume" : "Start Application"}</button>
-      <button class="jc-btn jc-btn-secondary" id="jc-pause-application">Pause</button>
+      <button class="jc-btn jc-btn-secondary ${wfIsRunning ? "jc-btn-pause-active" : ""}" id="jc-pause-application">Pause</button>
     </div>
-    ${session?.errors.length ? `<div style="font-size:11px;color:#fbbf24">Last error: ${escapeHtml(session.errors.at(-1).message)}</div>` : ""}
   </div>`;
     let progressHtml = "";
     if (isAutofilling || autofillProgress.statusText) {
@@ -3283,11 +3566,14 @@ ${job.company || "Company unknown"}${job.companyUncertain ? " (uncertain)" : ""}
         <span class="jc-card-title">Page Form Fields</span>
         <span class="jc-badge jc-badge-blue">${fieldCount} detected</span>
       </div>
-      <div class="jc-row" style="margin-top: 4px;">
+      <div class="jc-row" style="margin-top: 4px; gap: 8px;">
         <button class="jc-btn jc-btn-large" id="jc-autofill-btn" style="flex: 1;" ${isAutofilling ? "disabled" : ""}>
           ${isAutofilling ? "\u26A1 Filling Fields..." : "\u26A1 Autofill This Page"}
         </button>
-        <button class="jc-btn jc-btn-secondary" id="jc-rescan-btn" title="Rescan page fields" style="padding: 12px;">\u{1F504}</button>
+        <button class="jc-btn jc-btn-secondary ${isAutofilling ? "jc-btn-pause-active" : ""}" id="jc-pause-autofill-btn" style="padding: 10px 14px; font-size: 12px;" ${!isAutofilling ? "disabled" : ""} title="Pause / Stop autofill">
+          ${isAutofilling ? "\u23F8 Pause" : "Pause"}
+        </button>
+        <button class="jc-btn jc-btn-secondary" id="jc-rescan-btn" title="Rescan page fields" style="padding: 10px 12px;">\u{1F504}</button>
       </div>
     </div>
 
@@ -3652,7 +3938,14 @@ ${job.company || "Company unknown"}${job.companyUncertain ? " (uncertain)" : ""}
     const start = shadowRootRef.querySelector("#jc-start-application");
     if (start) start.onclick = () => void applicationEngine?.start();
     const pause = shadowRootRef.querySelector("#jc-pause-application");
-    if (pause) pause.onclick = () => applicationEngine?.pause();
+    if (pause) {
+      pause.onclick = () => {
+        applicationEngine?.pause();
+        if (isAutofilling) {
+          stopAutofillFlow("Autofill paused by user. Progress and filled fields preserved.");
+        }
+      };
+    }
     const toggleBtn = shadowRootRef.querySelector("#jc-toggle-btn");
     if (toggleBtn) {
       toggleBtn.onclick = () => {
@@ -3683,6 +3976,13 @@ ${job.company || "Company unknown"}${job.companyUncertain ? " (uncertain)" : ""}
     if (autofillBtn) {
       autofillBtn.onclick = () => {
         executeAutofillFlow();
+      };
+    }
+    const pauseAutofillBtn = shadowRootRef.querySelector("#jc-pause-autofill-btn");
+    if (pauseAutofillBtn) {
+      pauseAutofillBtn.onclick = () => {
+        stopAutofillFlow("Autofill paused by user. Progress and filled fields preserved.");
+        applicationEngine?.pause();
       };
     }
     const rescanBtn = shadowRootRef.querySelector("#jc-rescan-btn");
