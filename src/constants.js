@@ -1,3 +1,5 @@
+import { STRUCTURED_PROFILE_DEFAULTS } from './profile.js';
+
 // Dynamically injected at build time, fallback to package.json version
 export const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.3.0';
 export const APP_NAME = 'Job Copilot';
@@ -23,6 +25,7 @@ export const DEFAULT_SETTINGS = {
 };
 
 export const DEFAULT_PROFILE = {
+  ...STRUCTURED_PROFILE_DEFAULTS,
   fullName: '',
   email: '',
   phone: '',

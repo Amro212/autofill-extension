@@ -1,6 +1,7 @@
 import { getApiKey, getSettings, getProfile } from './storage.js';
 import { logger } from './debug.js';
 import { findExactOption } from './fields/combobox.js';
+import { profileForAI, fixedProfileAnswer } from './profile.js';
 
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 const AUTOFILL_TIMEOUT_MS = 120000;
@@ -189,10 +190,13 @@ CRITICAL OPERATING RULES:
 1. Ground all candidate claims strictly in the provided applicant profile, resume highlights, and applicant notes.
 2. NEVER fabricate or invent unlisted jobs, employers, dates, metrics, degrees, tools, or certifications (Rule 11).
 3. For structured questions (radio, select, checkbox, short text) where candidate preferences or standard defaults apply:
-   - Work authorization in the US: standard is Yes (authorized), unless applicant notes state otherwise. Set "inferred": true (Rule 12).
-   - Visa sponsorship: standard is No (will not require), unless applicant notes state otherwise. Set "inferred": true.
+   - Explicit structured applicantProfile answers have priority over conflicting resume context, applicant notes, previous answers, and generic defaults. Preserve explicit No answers.
+   - Work authorization and sponsorshipNow/sponsorshipFuture apply ONLY to applicantProfile.workCountry. Match the question's country, or the confirmed job work country when implicit. Do not transfer eligibility across countries or infer it from residence, nationality, or a phone number. Unknown country or unsupported eligibility: return an empty string. When structured eligibility is unset, only use unambiguous, country-specific facts from applicant context; never guess Yes or No.
+   - For sponsorship "now OR in the future", answer Yes if either scoped answer is Yes; answer No only when BOTH scoped answers are No. Otherwise leave empty. Distinguish current from future sponsorship.
    - Years of experience dropdowns: infer the candidate's level (e.g. Senior, Mid, 5+ years) from their resume context and select the best matching option. Set "inferred": true.
-   - Demographic surveys / EEOD / Disability / Veteran status: select a standard valid option (e.g. "I do not wish to answer", "No", or decline to state) from the provided options list. Set "inferred": true.
+   - Demographic surveys / EEOD / gender / pronouns / race or ethnicity / disability / veteran status: use ONLY the corresponding explicit structured profile answer. Not set means return an empty string, never a guessed identity or guessed No. Prefer not to answer means choose an actual decline option; if absent leave empty. Match meaning precisely: general veteran status does not establish protected veteran status, race does not establish Hispanic ethnicity, and gender does not establish sex assigned at birth. Use genderDescription only when gender is Self-describe. Do not mention demographics in unrelated narrative answers.
+   - "How did you hear about us?" and equivalent job discovery/source questions: always LinkedIn. For option fields choose only an offered LinkedIn option; if unavailable return empty (combobox may search LinkedIn). Do not invent a referrer or replace a LinkedIn profile URL with this source answer.
+   - Compensation must preserve expectedSalary, salaryCurrency and salaryPeriod together. Do not silently convert currency or annual/hourly pay. Total yearsExperience is not years with a particular tool. A preferred work arrangement does not imply willingness to accept all other arrangements. Past start dates require review, not a made-up new date.
    - Consent / Privacy / Background check agreement checkboxes: set value to true.
    - General, custom, or simulation text fields: provide a concise, relevant response based on the candidate's software background or profile. Follow NARRATIVE VOICE.
 4. For narrative / open-ended questions (e.g. "Why do you want to work here?", "Describe your experience with X"):
@@ -218,15 +222,7 @@ ${NARRATIVE_VOICE_RULES}
 }`;
 
   const userContent = JSON.stringify({
-    applicantProfile: {
-      fullName: profile.fullName,
-      email: profile.email,
-      phone: profile.phone,
-      location: profile.location,
-      linkedin: profile.linkedin,
-      github: profile.github,
-      portfolio: profile.portfolio,
-    },
+    applicantProfile: profileForAI(profile),
     resumeContext: profile.resumeContext,
     applicantNotes: profile.applicantNotes,
     pageContext: {
@@ -302,7 +298,9 @@ ${NARRATIVE_VOICE_RULES}
 
   const fieldsById = new Map(normalizedFields.map((f) => [f.fieldId, f]));
   const seenIds = new Set();
-  const validatedAnswers = parsed.answers.filter((ans) => {
+  const fixedAnswers = new Map(normalizedFields.map(field => [field.fieldId, fixedProfileAnswer(field, profile, { allowSearch })]).filter(([, answer]) => answer));
+  const candidateAnswers = [...parsed.answers.filter(ans => !fixedAnswers.has(ans?.fieldId)), ...fixedAnswers.values()];
+  const validatedAnswers = candidateAnswers.filter((ans) => {
     if (!ans || !fieldsById.has(ans.fieldId) || seenIds.has(ans.fieldId)) {
       logger.warn('AI returned an unknown or duplicate field ID (omitted)');
       return false;
@@ -356,11 +354,15 @@ Rules:
 2. Incorporate the candidate's specific feedback and revision instructions.
 3. Follow NARRATIVE VOICE. First-person. Stay concise.
 4. Output ONLY the rewritten answer text with no surrounding quotes or commentary.
+5. Explicit structured profile answers take precedence over conflicting notes. Eligibility applies only to workCountry. Do not guess unknown eligibility or demographics, expose demographics in unrelated answers, or convert compensation units. Job discovery source is always LinkedIn.
 ${NARRATIVE_VOICE_RULES}`;
 
   const userPrompt = `Question Label: ${fieldLabel}
 Current Answer:
 ${currentValue}
+
+Explicit Applicant Profile:
+${JSON.stringify(profileForAI(profile))}
 
 Candidate Resume Highlights:
 ${profile.resumeContext}

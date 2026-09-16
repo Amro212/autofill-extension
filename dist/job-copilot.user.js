@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Job Copilot
 // @namespace    https://github.com/Amro212/autofill-extension
-// @version      0.3.7
+// @version      0.3.8
 // @description  Job Copilot — Tampermonkey userscript for AI job applications
 // @author       Job Copilot Team
 // @updateURL    https://raw.githubusercontent.com/Amro212/autofill-extension/main/dist/job-copilot.user.js
@@ -20,8 +20,87 @@
 // ==/UserScript==
 
 (() => {
+  // src/profile.js
+  var yesNo = ["Yes", "No"];
+  var disclosure = ["Yes", "No", "Prefer not to answer"];
+  var PROFILE_SECTIONS = [
+    { title: "Work eligibility", description: "Authorization and sponsorship answers apply only to this work country. Leave unknown answers unset.", fields: [
+      { name: "workCountry", label: "Work country", placeholder: "e.g. Canada" },
+      { name: "workAuthorization", label: "Authorized to work in this country?", options: yesNo },
+      { name: "sponsorshipNow", label: "Require sponsorship now?", options: yesNo },
+      { name: "sponsorshipFuture", label: "Require sponsorship in the future?", options: yesNo }
+    ] },
+    { title: "Work preferences", description: "Save answers you want reused across applications.", fields: [
+      { name: "workArrangement", label: "Preferred work arrangement", options: ["Remote", "Hybrid", "Onsite", "Flexible"] },
+      { name: "willingToRelocate", label: "Willing to relocate?", options: [...yesNo, "Depends on the opportunity"] },
+      { name: "travelAvailability", label: "Willingness to travel", placeholder: "e.g. Up to 25%" },
+      { name: "startDate", label: "Earliest start date", type: "date" },
+      { name: "noticePeriod", label: "Notice period", placeholder: "e.g. Two weeks or available immediately" }
+    ] },
+    { title: "Compensation", description: "Include currency and pay period so your expectations are unambiguous.", fields: [
+      { name: "expectedSalary", label: "Expected salary or range", placeholder: "e.g. 90000\u2013110000" },
+      { name: "salaryCurrency", label: "Currency", placeholder: "e.g. CAD, USD, GBP" },
+      { name: "salaryPeriod", label: "Pay period", options: ["Annual", "Monthly", "Hourly"] }
+    ] },
+    { title: "Background", description: "Your context below still supplies detailed experience, projects and qualifications.", fields: [
+      { name: "educationLevel", label: "Highest education level", options: ["High school", "Associate degree", "Bachelor's degree", "Master's degree", "Doctorate", "Professional degree", "Other"] },
+      { name: "yearsExperience", label: "Total years of professional experience", type: "number", placeholder: "e.g. 3", min: "0", step: "0.5" },
+      { name: "languages", label: "Languages and proficiency", placeholder: "e.g. English (fluent), French (intermediate)" }
+    ] },
+    { title: "Optional self-identification", description: "Not set leaves the answer blank. Choose \u201CPrefer not to answer\u201D to decline disclosure. These answers are never guessed.", fields: [
+      { name: "gender", label: "Gender", options: ["Woman", "Man", "Non-binary", "Self-describe", "Prefer not to answer"] },
+      { name: "genderDescription", label: "Gender self-description (if selected)", placeholder: "Your own description" },
+      { name: "pronouns", label: "Pronouns", placeholder: "e.g. she/her, he/him, they/them, Prefer not to answer" },
+      { name: "raceEthnicity", label: "Race / ethnicity", placeholder: "Your self-description or Prefer not to answer" },
+      { name: "disabilityStatus", label: "Disability (current or past)", options: disclosure },
+      { name: "veteranStatus", label: "Veteran status", options: disclosure }
+    ] }
+  ];
+  var PROFILE_FIELDS = PROFILE_SECTIONS.flatMap((section) => section.fields);
+  var STRUCTURED_PROFILE_DEFAULTS = Object.fromEntries(PROFILE_FIELDS.map((field) => [field.name, ""]));
+  function profileForAI(profile) {
+    const keys = ["fullName", "email", "phone", "location", "linkedin", "github", "portfolio", ...PROFILE_FIELDS.map((field) => field.name)];
+    return Object.fromEntries(keys.map((key2) => [key2, profile[key2] || ""]));
+  }
+  var normalize = (value) => String(value || "").toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim();
+  var isDecline = (value) => /^(prefer not to (?:answer|say|disclose)|(?:i )?(?:do not|dont) (?:wish|want) to (?:answer|disclose)|decline(?: to (?:state|answer|identify|disclose))?)$/.test(normalize(value));
+  function matchesDemographicOption(key2, value, label) {
+    const option = normalize(label);
+    if (key2 === "gender") {
+      return value === "Woman" && option === "female" || value === "Man" && option === "male";
+    }
+    if (key2 === "disabilityStatus") {
+      return value === "Yes" && /^yes i have a disability\b/.test(option) || value === "No" && /^no i (?:do not|dont) have a disability\b/.test(option);
+    }
+    return false;
+  }
+  function fixedProfileAnswer(field, profile, { allowSearch = true } = {}) {
+    const label = normalize(field.label);
+    const source = /^(?:how (?:did|do) you (?:hear|learn) about\b|where did you (?:hear about|find|learn about|see) (?:us|this (?:job|role|position|opportunity|opening)|(?:the|our) (?:job|company|role|position|opportunity|opening))\b|(?:application|applicant|referral|recruitment|job) source$|source$)/.test(label);
+    let key2;
+    if (/^(?:what (?:is|are) your |your |please (?:select|specify|indicate) your )?(?:gender(?: identity)?|pronouns|race(?: (?:and )?ethnicity)?|ethnicity|disability(?: status)?|veteran(?: status)?)(?: optional)?$/.test(label)) {
+      if (/\bgender\b/.test(label)) key2 = "gender";
+      else if (/\bpronouns\b/.test(label)) key2 = "pronouns";
+      else if (/\b(?:race|ethnicity)\b/.test(label)) key2 = "raceEthnicity";
+      else if (/\bdisability\b/.test(label)) key2 = "disabilityStatus";
+      else if (/\bveteran\b/.test(label)) key2 = "veteranStatus";
+    }
+    if (/^do you have (?:a |any )?disabilit(?:y|ies)$/.test(label)) key2 = "disabilityStatus";
+    if (!source && !key2) return null;
+    let value = source ? "LinkedIn" : profile[key2] || "";
+    if (key2 === "gender" && value === "Self-describe") value = profile.genderDescription || "";
+    const answer = { fieldId: field.fieldId, value, inferred: false };
+    if (!value || !["select", "combobox", "radio", "checkbox"].includes(field.type)) return answer;
+    const options = field.options || [];
+    const matches = options.filter((option) => normalize(option.label) === normalize(value) || normalize(option.value) === normalize(value) || source && /^(?:linkedin jobs|linkedincom)$/.test(normalize(option.label)) || isDecline(value) && isDecline(option.label) || matchesDemographicOption(key2, value, option.label));
+    const match = matches.length === 1 ? matches[0] : null;
+    answer.value = match ? field.type === "combobox" ? match.label : match.value : "";
+    if (source && !match && field.type === "combobox" && allowSearch) answer.searchQuery = "LinkedIn";
+    return answer;
+  }
+
   // src/constants.js
-  var APP_VERSION = true ? "0.3.7" : "0.3.0";
+  var APP_VERSION = true ? "0.3.8" : "0.3.0";
   var APP_NAME = "Job Copilot";
   var STORAGE_KEYS = {
     SETTINGS: "jc:settings",
@@ -42,6 +121,7 @@
     autopilot: false
   };
   var DEFAULT_PROFILE = {
+    ...STRUCTURED_PROFILE_DEFAULTS,
     fullName: "",
     email: "",
     phone: "",
@@ -575,10 +655,13 @@ CRITICAL OPERATING RULES:
 1. Ground all candidate claims strictly in the provided applicant profile, resume highlights, and applicant notes.
 2. NEVER fabricate or invent unlisted jobs, employers, dates, metrics, degrees, tools, or certifications (Rule 11).
 3. For structured questions (radio, select, checkbox, short text) where candidate preferences or standard defaults apply:
-   - Work authorization in the US: standard is Yes (authorized), unless applicant notes state otherwise. Set "inferred": true (Rule 12).
-   - Visa sponsorship: standard is No (will not require), unless applicant notes state otherwise. Set "inferred": true.
+   - Explicit structured applicantProfile answers have priority over conflicting resume context, applicant notes, previous answers, and generic defaults. Preserve explicit No answers.
+   - Work authorization and sponsorshipNow/sponsorshipFuture apply ONLY to applicantProfile.workCountry. Match the question's country, or the confirmed job work country when implicit. Do not transfer eligibility across countries or infer it from residence, nationality, or a phone number. Unknown country or unsupported eligibility: return an empty string. When structured eligibility is unset, only use unambiguous, country-specific facts from applicant context; never guess Yes or No.
+   - For sponsorship "now OR in the future", answer Yes if either scoped answer is Yes; answer No only when BOTH scoped answers are No. Otherwise leave empty. Distinguish current from future sponsorship.
    - Years of experience dropdowns: infer the candidate's level (e.g. Senior, Mid, 5+ years) from their resume context and select the best matching option. Set "inferred": true.
-   - Demographic surveys / EEOD / Disability / Veteran status: select a standard valid option (e.g. "I do not wish to answer", "No", or decline to state) from the provided options list. Set "inferred": true.
+   - Demographic surveys / EEOD / gender / pronouns / race or ethnicity / disability / veteran status: use ONLY the corresponding explicit structured profile answer. Not set means return an empty string, never a guessed identity or guessed No. Prefer not to answer means choose an actual decline option; if absent leave empty. Match meaning precisely: general veteran status does not establish protected veteran status, race does not establish Hispanic ethnicity, and gender does not establish sex assigned at birth. Use genderDescription only when gender is Self-describe. Do not mention demographics in unrelated narrative answers.
+   - "How did you hear about us?" and equivalent job discovery/source questions: always LinkedIn. For option fields choose only an offered LinkedIn option; if unavailable return empty (combobox may search LinkedIn). Do not invent a referrer or replace a LinkedIn profile URL with this source answer.
+   - Compensation must preserve expectedSalary, salaryCurrency and salaryPeriod together. Do not silently convert currency or annual/hourly pay. Total yearsExperience is not years with a particular tool. A preferred work arrangement does not imply willingness to accept all other arrangements. Past start dates require review, not a made-up new date.
    - Consent / Privacy / Background check agreement checkboxes: set value to true.
    - General, custom, or simulation text fields: provide a concise, relevant response based on the candidate's software background or profile. Follow NARRATIVE VOICE.
 4. For narrative / open-ended questions (e.g. "Why do you want to work here?", "Describe your experience with X"):
@@ -603,15 +686,7 @@ ${NARRATIVE_VOICE_RULES}
   ]
 }`;
     const userContent = JSON.stringify({
-      applicantProfile: {
-        fullName: profile.fullName,
-        email: profile.email,
-        phone: profile.phone,
-        location: profile.location,
-        linkedin: profile.linkedin,
-        github: profile.github,
-        portfolio: profile.portfolio
-      },
+      applicantProfile: profileForAI(profile),
       resumeContext: profile.resumeContext,
       applicantNotes: profile.applicantNotes,
       pageContext: {
@@ -679,7 +754,9 @@ ${NARRATIVE_VOICE_RULES}
     }
     const fieldsById = new Map(normalizedFields.map((f) => [f.fieldId, f]));
     const seenIds = /* @__PURE__ */ new Set();
-    const validatedAnswers = parsed.answers.filter((ans) => {
+    const fixedAnswers = new Map(normalizedFields.map((field) => [field.fieldId, fixedProfileAnswer(field, profile, { allowSearch })]).filter(([, answer]) => answer));
+    const candidateAnswers = [...parsed.answers.filter((ans) => !fixedAnswers.has(ans?.fieldId)), ...fixedAnswers.values()];
+    const validatedAnswers = candidateAnswers.filter((ans) => {
       if (!ans || !fieldsById.has(ans.fieldId) || seenIds.has(ans.fieldId)) {
         logger.warn("AI returned an unknown or duplicate field ID (omitted)");
         return false;
@@ -725,10 +802,14 @@ Rules:
 2. Incorporate the candidate's specific feedback and revision instructions.
 3. Follow NARRATIVE VOICE. First-person. Stay concise.
 4. Output ONLY the rewritten answer text with no surrounding quotes or commentary.
+5. Explicit structured profile answers take precedence over conflicting notes. Eligibility applies only to workCountry. Do not guess unknown eligibility or demographics, expose demographics in unrelated answers, or convert compensation units. Job discovery source is always LinkedIn.
 ${NARRATIVE_VOICE_RULES}`;
     const userPrompt = `Question Label: ${fieldLabel}
 Current Answer:
 ${currentValue}
+
+Explicit Applicant Profile:
+${JSON.stringify(profileForAI(profile))}
 
 Candidate Resume Highlights:
 ${profile.resumeContext}
@@ -3664,8 +3745,26 @@ input:checked + .jc-slider:before {
   }
   function renderProfileTab() {
     const profile = getProfile();
+    const sections = PROFILE_SECTIONS.map((section, index) => `
+    <details class="jc-profile-section" ${index === 0 ? "open" : ""} style="border: 1px solid #334155; border-radius: 10px; padding: 12px;">
+      <summary style="cursor: pointer; font-weight: 600;">${escapeHtml(section.title)}</summary>
+      <p style="font-size: 12px; color: #94a3b8; margin: 8px 0 12px;">${escapeHtml(section.description)}</p>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        ${section.fields.map((field) => {
+      const value = String(profile[field.name] || "");
+      const id = `jc-profile-${field.name}`;
+      const control = field.options ? `<select id="${id}" class="jc-input" name="${field.name}">
+                <option value="">Not set</option>
+                ${field.options.map((option) => `<option value="${escapeHtml(option)}" ${option === value ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}
+              </select>` : `<input id="${id}" class="jc-input" type="${field.type || "text"}" name="${field.name}" value="${escapeHtml(value)}" placeholder="${escapeHtml(field.placeholder || "")}" ${field.min !== void 0 ? `min="${field.min}" step="${field.step}"` : ""} />`;
+      return `<div class="jc-form-group"><label for="${id}">${escapeHtml(field.label)}</label>${control}</div>`;
+    }).join("")}
+      </div>
+    </details>
+  `).join("");
     return `
     <form id="jc-profile-form" style="display: flex; flex-direction: column; gap: 12px;">
+      <div style="font-size: 12px; color: #94a3b8;">Save common answers once. Explicit answers take priority over background notes.</div>
       <div class="jc-form-group">
         <label>Full Name</label>
         <input class="jc-input" type="text" name="fullName" value="${escapeHtml(profile.fullName)}" placeholder="e.g. Jane Doe" />
@@ -3703,14 +3802,20 @@ input:checked + .jc-slider:before {
         </div>
       </div>
 
-      <div class="jc-form-group">
-        <label>Resume / Background Summary</label>
-        <textarea class="jc-textarea" name="resumeContext" rows="4" placeholder="Paste your core resume highlights, skills, and background summary...">${escapeHtml(profile.resumeContext)}</textarea>
+      ${sections}
+
+      <div style="padding: 10px 12px; border-radius: 8px; background: rgba(59,130,246,0.1); font-size: 12px;">
+        <strong>Application source: LinkedIn</strong><br />Used for \u201CHow did you hear about us?\u201D If LinkedIn is unavailable, the field is left for review.
       </div>
 
       <div class="jc-form-group">
-        <label>Applicant Notes / Custom Rules</label>
-        <textarea class="jc-textarea" name="applicantNotes" rows="2" placeholder="e.g. Prefer Remote, US Citizen, Target salary $180k+">${escapeHtml(profile.applicantNotes)}</textarea>
+        <label for="jc-profile-resumeContext">Resume / Background Summary</label>
+        <textarea id="jc-profile-resumeContext" class="jc-textarea" name="resumeContext" rows="4" placeholder="Paste your core resume highlights, skills, and background summary...">${escapeHtml(profile.resumeContext)}</textarea>
+      </div>
+
+      <div class="jc-form-group">
+        <label for="jc-profile-applicantNotes">Applicant Notes / Custom Rules</label>
+        <textarea id="jc-profile-applicantNotes" class="jc-textarea" name="applicantNotes" rows="2" placeholder="Additional preferences, exceptions, and guidance for written answers...">${escapeHtml(profile.applicantNotes)}</textarea>
       </div>
 
       <div class="jc-row" style="margin-top: 4px;">
@@ -4050,6 +4155,8 @@ input:checked + .jc-slider:before {
         e.preventDefault();
         const formData = new FormData(profileForm);
         const newProfile = {
+          ...getProfile(),
+          ...Object.fromEntries(PROFILE_FIELDS.map((field) => [field.name, String(formData.get(field.name) || "").trim()])),
           fullName: formData.get("fullName") || "",
           email: formData.get("email") || "",
           phone: formData.get("phone") || "",

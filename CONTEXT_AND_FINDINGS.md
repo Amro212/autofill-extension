@@ -6,6 +6,25 @@ This file tracks user-reported findings, platform bugs, audit analyses, and code
 
 ## Findings & Bug Reports
 
+### Entry: 2026-09-15 — Applicant profile structured application answers
+
+- **Phase / Environment**: Current Phase 3 refinement; shared applicant profile and unified AI requests, all ATS platforms.
+- **User finding / request**: Profile is too generic and currently relies on a large personal-context document. Preserve Resume Context and Applicant Notes; add explicit recurring application answers including sponsorship, gender, disability. Default discovery-source answers to LinkedIn.
+- **Audit**: `src/constants.js` exposes only contact/link fields plus two context strings; `src/ui.js` saves those fields explicitly. `src/ai.js` serializes only those basics and currently instructs guessed US authorization, sponsorship, and demographic defaults. New controls must also reach AI payloads and take priority over generic defaults and conflicting context.
+- **Research**: Indeed's screener documentation covers authorization, location, commute/relocation, education, experience, languages, licenses, availability, and travel. Greenhouse's standard voluntary questionnaire covers race, gender, veteran status, and disability. These are representative categories, not a frequency ranking.
+- **Proposed resolution**: Grouped profile fields for eligibility scoped by country, preferences/availability/compensation, and optional self-identification; preserve existing context and GM storage. Explicit answers take priority; unset sensitive/eligibility fields must not become guessed Yes/No. Source questions use LinkedIn where supported; unavailable options remain reviewable rather than fabricated.
+- **Turn changes / next**: Updated this log only. Research and code audit complete; present concrete design for required brainstorming approval before implementation. No runtime changes or commit/tag. Target remains current Phase 3 profile refinement.
+
+### Turn: 2026-09-15 — Approved applicant profile refinement implemented
+
+- **Phase / Environment**: Current Phase 3 profile refinement, userscript v0.3.8; deterministic node:test/jsdom fixtures and mocked OpenRouter transport.
+- **Files changed / created**: `src/profile.js`, `src/constants.js`, `src/ui.js`, `src/ai.js`, `tests/profile.test.js`, `tests/panel.test.js`, `docs/plans/2026-09-15-applicant-profile.md`, `package.json`, generated `dist/job-copilot.user.js`, and this log.
+- **Changes / rationale**: Added collapsible eligibility, work preferences, compensation, background, and optional self-identification sections. Retained contact fields and both context sections. Shared field schema supplies additive defaults and explicit AI serialization; profile saves preserve existing unknown fields. Eligibility is scoped by work country in AI instructions, with separate current/future sponsorship. Structured answers take precedence in primary, repair, and rewrite requests; removed guessed authorization/sponsorship/demographic prompt defaults.
+- **Source / demographic handling**: Source answers are deterministically constrained to LinkedIn, including model omissions and supported LinkedIn Jobs/LinkedIn.com labels. Missing options remain empty, with one bounded combobox search where supported. Common demographic labels use explicit answers or remain blank; supported decline and standard gender/disability labels map only to owned options. More complex question wording continues through AI with explicit grounding rules.
+- **Review fixes**: Independent reviewer found rejected LinkedIn aliases and overbroad discovery-prefix matching. Both reproduced by failing tests, corrected, and verified. Additional tests prevent gender-at-birth and demographic-related narrative questions from receiving simplistic overrides.
+- **Validation**: Initial seven new integration tests failed for missing functionality; all subsequently passed. Final full suite: 79 tests passed (`node --test --test-reporter=dot tests/*.test.js`, exit 0). `npm run build` succeeded, automatically incrementing 0.3.7 to 0.3.8. `git diff --check` passed. Bundled-panel test verifies labelled controls, save/reload, legacy context preservation, and no page localStorage writes.
+- **Limits / next**: No live ATS or live OpenRouter verification this turn; contextual interpretation of eligibility and noncanonical question wording remains model-dependent. Install generated v0.3.8 in Tampermonkey, save explicit profile preferences, and perform manual acceptance. No commit/tag; phase sign-off remains manual.
+
 ### Entry: 2026-09-15 — Embedded Greenhouse application reports 0 detected fields (Cross-Origin iframe)
 
 - **Phase / Environment**: Phase 3 / ATS Integration, AlayaCare Careers (`https://alayacare.com/open-positions/?gh_jid=8811313002`). Job Copilot v0.3.5.

@@ -1,4 +1,5 @@
 import { APP_VERSION, APP_NAME, POPULAR_MODELS, UI_IDS, FILL_STATUS } from './constants.js';
+import { PROFILE_SECTIONS, PROFILE_FIELDS } from './profile.js';
 import {
   getSettings,
   saveSettings,
@@ -1409,9 +1410,29 @@ function renderReviewTab() {
 
 function renderProfileTab() {
   const profile = getProfile();
+  const sections = PROFILE_SECTIONS.map((section, index) => `
+    <details class="jc-profile-section" ${index === 0 ? 'open' : ''} style="border: 1px solid #334155; border-radius: 10px; padding: 12px;">
+      <summary style="cursor: pointer; font-weight: 600;">${escapeHtml(section.title)}</summary>
+      <p style="font-size: 12px; color: #94a3b8; margin: 8px 0 12px;">${escapeHtml(section.description)}</p>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        ${section.fields.map(field => {
+          const value = String(profile[field.name] || '');
+          const id = `jc-profile-${field.name}`;
+          const control = field.options
+            ? `<select id="${id}" class="jc-input" name="${field.name}">
+                <option value="">Not set</option>
+                ${field.options.map(option => `<option value="${escapeHtml(option)}" ${option === value ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}
+              </select>`
+            : `<input id="${id}" class="jc-input" type="${field.type || 'text'}" name="${field.name}" value="${escapeHtml(value)}" placeholder="${escapeHtml(field.placeholder || '')}" ${field.min !== undefined ? `min="${field.min}" step="${field.step}"` : ''} />`;
+          return `<div class="jc-form-group"><label for="${id}">${escapeHtml(field.label)}</label>${control}</div>`;
+        }).join('')}
+      </div>
+    </details>
+  `).join('');
 
   return `
     <form id="jc-profile-form" style="display: flex; flex-direction: column; gap: 12px;">
+      <div style="font-size: 12px; color: #94a3b8;">Save common answers once. Explicit answers take priority over background notes.</div>
       <div class="jc-form-group">
         <label>Full Name</label>
         <input class="jc-input" type="text" name="fullName" value="${escapeHtml(profile.fullName)}" placeholder="e.g. Jane Doe" />
@@ -1449,14 +1470,20 @@ function renderProfileTab() {
         </div>
       </div>
 
-      <div class="jc-form-group">
-        <label>Resume / Background Summary</label>
-        <textarea class="jc-textarea" name="resumeContext" rows="4" placeholder="Paste your core resume highlights, skills, and background summary...">${escapeHtml(profile.resumeContext)}</textarea>
+      ${sections}
+
+      <div style="padding: 10px 12px; border-radius: 8px; background: rgba(59,130,246,0.1); font-size: 12px;">
+        <strong>Application source: LinkedIn</strong><br />Used for “How did you hear about us?” If LinkedIn is unavailable, the field is left for review.
       </div>
 
       <div class="jc-form-group">
-        <label>Applicant Notes / Custom Rules</label>
-        <textarea class="jc-textarea" name="applicantNotes" rows="2" placeholder="e.g. Prefer Remote, US Citizen, Target salary $180k+">${escapeHtml(profile.applicantNotes)}</textarea>
+        <label for="jc-profile-resumeContext">Resume / Background Summary</label>
+        <textarea id="jc-profile-resumeContext" class="jc-textarea" name="resumeContext" rows="4" placeholder="Paste your core resume highlights, skills, and background summary...">${escapeHtml(profile.resumeContext)}</textarea>
+      </div>
+
+      <div class="jc-form-group">
+        <label for="jc-profile-applicantNotes">Applicant Notes / Custom Rules</label>
+        <textarea id="jc-profile-applicantNotes" class="jc-textarea" name="applicantNotes" rows="2" placeholder="Additional preferences, exceptions, and guidance for written answers...">${escapeHtml(profile.applicantNotes)}</textarea>
       </div>
 
       <div class="jc-row" style="margin-top: 4px;">
@@ -1830,6 +1857,8 @@ function attachEventHandlers() {
       e.preventDefault();
       const formData = new FormData(profileForm);
       const newProfile = {
+        ...getProfile(),
+        ...Object.fromEntries(PROFILE_FIELDS.map(field => [field.name, String(formData.get(field.name) || '').trim()])),
         fullName: formData.get('fullName') || '',
         email: formData.get('email') || '',
         phone: formData.get('phone') || '',

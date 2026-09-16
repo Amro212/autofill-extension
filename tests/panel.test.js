@@ -3,6 +3,41 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { JSDOM } from 'jsdom';
 
+test('profile sections save and reload explicit answers while preserving legacy context', async () => {
+  const bundle = await build({ entryPoints: ['src/main.js'], bundle: true, format: 'iife', write: false });
+  const dom = new JSDOM('<body></body>', { url: 'https://example.com/apply', runScripts: 'dangerously' });
+  const storage = new Map([['jc:profile', { fullName: 'Test Applicant', resumeContext: 'Existing detailed resume', applicantNotes: 'Existing custom notes', futureField: 'preserve' }]]);
+  dom.window.GM_getValue = (key, fallback) => storage.get(key) ?? fallback;
+  dom.window.GM_setValue = (key, value) => storage.set(key, value);
+  dom.window.GM_getTab = callback => callback({});
+  dom.window.GM_saveTab = () => {};
+  dom.window.CSS = { escape: value => value };
+  try {
+    dom.window.eval(bundle.outputFiles[0].text);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const root = dom.window.document.querySelector('#job-copilot-root').shadowRoot;
+    root.querySelector('#jc-toggle-btn').click();
+    root.querySelector('[data-tab=profile]').click();
+    const values = { workCountry: 'Canada', workAuthorization: 'Yes', sponsorshipNow: 'No', sponsorshipFuture: 'Yes', workArrangement: 'Remote', willingToRelocate: 'No', travelAvailability: 'Up to 25%', startDate: '2026-10-01', noticePeriod: 'Two weeks', expectedSalary: '95000', salaryCurrency: 'CAD', salaryPeriod: 'Annual', educationLevel: "Bachelor's degree", yearsExperience: '3', languages: 'English, French', gender: 'Woman', pronouns: 'she/her', raceEthnicity: 'Prefer not to answer', disabilityStatus: 'Prefer not to answer', veteranStatus: 'No' };
+    for (const [name, value] of Object.entries(values)) {
+      const input = root.querySelector(`[name=${name}]`);
+      assert.ok(input, `${name} has a control`);
+      assert.ok(input.labels.length, `${name} has an accessible label`);
+      input.value = value;
+    }
+    root.querySelector('#jc-profile-form').dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
+    for (const [name, value] of Object.entries(values)) assert.equal(storage.get('jc:profile')[name], value, name);
+    assert.equal(storage.get('jc:profile').resumeContext, 'Existing detailed resume');
+    assert.equal(storage.get('jc:profile').applicantNotes, 'Existing custom notes');
+    assert.equal(storage.get('jc:profile').futureField, 'preserve');
+    root.querySelector('[data-tab=settings]').click();
+    root.querySelector('[data-tab=profile]').click();
+    for (const [name, value] of Object.entries(values)) assert.equal(root.querySelector(`[name=${name}]`).value, value, name);
+    assert.match(root.textContent, /LinkedIn/);
+    assert.equal(dom.window.localStorage.length, 0);
+  } finally { dom.window.close(); }
+});
+
 test('bundled panel mounts once and captures a job using GM storage', async () => {
   const bundle = await build({ entryPoints: ['src/main.js'], bundle: true, format: 'iife', write: false });
   const dom = new JSDOM('<body><main><h1>Software Engineer</h1><article>Job description: Build useful software.</article><a href="/apply/42">Apply now</a></main></body>', { url: 'https://example.com/jobs/42', runScripts: 'dangerously' });
