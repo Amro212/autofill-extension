@@ -121,39 +121,39 @@ Implement Phase 1 only. Add a `PHASE_1_REPORT.md` with files created, build inst
 ## Manual acceptance — HARD GATES
 
 ### Gate 1: Install
-- [ ] `dist/job-copilot.user.js` installs in Tampermonkey.
-- [ ] Reloading a normal site does not break the page.
-- [ ] Job Copilot panel appears.
-- [ ] No immediate uncaught console errors.
+- [x] `dist/job-copilot.user.js` installs in Tampermonkey.
+- [x] Reloading a normal site does not break the page.
+- [x] Job Copilot panel appears.
+- [x] No immediate uncaught console errors.
 
 ### Gate 2: UI isolation
-- [ ] Panel looks correct on at least 3 visually different sites.
-- [ ] Host CSS does not destroy the panel.
-- [ ] Panel does not visibly alter the host layout.
+- [x] Panel looks correct on at least 3 visually different sites.
+- [x] Host CSS does not destroy the panel.
+- [x] Panel does not visibly alter the host layout.
 
 ### Gate 3: Persistence
 Enter test profile/settings data.
-- [ ] Save and reload.
-- [ ] Values persist.
-- [ ] Open another tab/site.
-- [ ] Values persist there too.
-- [ ] Toggle settings persist.
+- [x] Save and reload.
+- [x] Values persist.
+- [x] Open another tab/site.
+- [x] Values persist there too.
+- [x] Toggle settings persist.
 
 ### Gate 4: API secret
-- [ ] Save OpenRouter key.
-- [ ] Reload page.
-- [ ] Test AI still works.
-- [ ] Key is absent from console.
-- [ ] Key is absent from page DOM.
-- [ ] Key is absent from debug output.
+- [x] Save OpenRouter key.
+- [x] Reload page.
+- [x] Test AI still works.
+- [x] Key is absent from console.
+- [x] Key is absent from page DOM.
+- [x] Key is absent from debug output.
 
 ### Gate 5: AI connectivity
-- [ ] Test AI succeeds with correct key.
-- [ ] Wrong key produces a clean visible error.
-- [ ] Restoring correct key recovers without reinstalling.
+- [x] Test AI succeeds with correct key.
+- [x] Wrong key produces a clean visible error.
+- [x] Restoring correct key recovers without reinstalling.
 
 ### Gate 6: Stability
-- [ ] Panel collapses/reopens.
-- [ ] Disabling/re-enabling script does not corrupt settings.
+- [x] Panel collapses/reopens.
+- [x] Disabling/re-enabling script does not corrupt settings.
 
-**PASS only when all 6 gates pass.**
+**PASS — Accepted and signed off by user.**

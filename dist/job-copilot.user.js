@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Job Copilot
 // @namespace    https://github.com/Amro212/autofill-extension
-// @version      0.3.8
+// @version      0.3.9
 // @description  Job Copilot — Tampermonkey userscript for AI job applications
 // @author       Job Copilot Team
 // @updateURL    https://raw.githubusercontent.com/Amro212/autofill-extension/main/dist/job-copilot.user.js
@@ -100,7 +100,7 @@
   }
 
   // src/constants.js
-  var APP_VERSION = true ? "0.3.8" : "0.3.0";
+  var APP_VERSION = true ? "0.3.9" : "0.3.0";
   var APP_NAME = "Job Copilot";
   var STORAGE_KEYS = {
     SETTINGS: "jc:settings",
@@ -2010,6 +2010,9 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
       id: globalThis.crypto.randomUUID(),
       job,
       currentUrl: window.location.href,
+      identityVersion: 2,
+      completedSteps: 0,
+      currentStep: "",
       history: [],
       answers: {},
       errors: [],
@@ -2064,6 +2067,50 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
   }
 
   // src/navigation.js
+  function workflowLabel(field) {
+    if (["radio", "checkbox"].includes(field.type)) return field.label;
+    const el = field.element;
+    const label = el.id && el.ownerDocument.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+    if (label) return cleanText(visibleText(label));
+    const references = (el.getAttribute("aria-labelledby") || "").split(/\s+/).map((id) => el.ownerDocument.getElementById(id)).filter((node) => node && node !== el && !el.contains(node));
+    const text = references.map((node) => {
+      const clone = node.cloneNode(true);
+      clone.querySelectorAll("input,textarea,select,button,[role=combobox],[role=listbox],[role=alert]").forEach((child) => child.remove());
+      return cleanText(clone.textContent);
+    }).filter(Boolean).join(" ");
+    return text || field.label;
+  }
+  function questionIdentity(field) {
+    return JSON.stringify([
+      field.label,
+      field.type,
+      ["select", "radio"].includes(field.type) ? field.options.map((o) => [o.value, o.label]) : null
+    ]);
+  }
+  function observePage(fields, doc = document) {
+    const markers = Array.from(doc.querySelectorAll("[aria-current=step]")).filter(isVisible2);
+    const scope = fields[0]?.element.closest("main,[role=main]") || doc.querySelector("main,[role=main]") || doc.body;
+    const headings = Array.from(scope.querySelectorAll("h1,h2,h3,[role=heading]")).filter((node) => isVisible2(node) && !node.closest("header,nav,footer,[role=alert],[role=dialog],[role=listbox],.field-error,.validation-error") && !/^(?:errors?\b|validation\b)/i.test(visibleText(node)));
+    const leading = headings.filter((node) => !fields[0] || Boolean(node.compareDocumentPosition(fields[0].element) & 4));
+    const heading = leading.find((node) => node.tagName !== "H1") || leading[0];
+    return {
+      url: doc.location.href,
+      marker: markers.length === 1 ? visibleText(markers[0]) : "",
+      heading: heading ? visibleText(heading) : "",
+      fields: fields.map((f) => ({ id: f.id, question: questionIdentity(f), disabled: Boolean(f.element.disabled) }))
+    };
+  }
+  function comparePages(before, after, afterClick = false) {
+    if (before.url !== after.url) return "changed";
+    if (before.marker && after.marker && before.marker !== after.marker) return "changed";
+    if (before.fields.length && !after.fields.length) return "ambiguous";
+    if (before.marker && after.marker) return "same";
+    if (before.heading && after.heading && before.heading !== after.heading) return "changed";
+    const overlap = before.fields.some((a) => after.fields.some((b) => a.id === b.id || a.question === b.question));
+    if (overlap) return "same";
+    if (afterClick && !before.marker && !after.marker && before.fields.length && after.fields.length && !(before.heading && after.heading)) return "changed";
+    return "ambiguous";
+  }
   function findContinue(doc = document) {
     const candidates = Array.from(doc.querySelectorAll("button,input[type=submit],input[type=button],a[href],[role=button]")).filter(isVisible2).filter((el) => {
       const label = visibleText(el) || el.value || el.getAttribute("aria-label") || "";
@@ -2072,7 +2119,8 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
     return candidates.length === 1 ? candidates[0] : null;
   }
   function pageSignature(fields, doc = document) {
-    return JSON.stringify([doc.location.href, Array.from(doc.querySelectorAll("h1,h2,h3,[aria-current=step]")).filter(isVisible2).map(visibleText), fields.map((f) => [f.id, f.label, f.type])]);
+    const page = observePage(fields, doc);
+    return JSON.stringify([page.url, page.marker || page.heading || page.fields.map((f) => [f.id, f.question]).sort()]);
   }
   function isDisabled(control) {
     return Boolean(control?.disabled || control?.getAttribute("aria-disabled") === "true");
@@ -2132,7 +2180,8 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
   }
 
   // src/application.js
-  var scanFormFields2 = () => scanFormFields().filter((f) => isVisible2(f.element) && !f.element.disabled && !f.element.readOnly && f.element.type !== "file");
+  var scanPageFields = () => scanFormFields().filter((f) => isVisible2(f.element) && f.element.type !== "file" && !f.element.closest("[role=listbox],.select__menu")).map((f) => ({ ...f, label: workflowLabel(f) }));
+  var scanFormFields2 = () => scanPageFields().filter((f) => !f.element.disabled && !f.element.readOnly);
   var empty = (field) => field.type === "checkbox" ? !field.element.checked : !String(field.currentValue ?? "").trim();
   var runnable = /* @__PURE__ */ new Set(["running", "captcha", "waiting"]);
   function createApplicationEngine({ answer = generateAutofillAnswers, onChange = () => {
@@ -2152,6 +2201,83 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
     });
     const results = /* @__PURE__ */ new Map();
     let lastEmission = "";
+    let lastObservationLog = "";
+    function compatibleSession() {
+      if (session.identityVersion === 2) return true;
+      status("paused", "Step tracking was updated. Click Capture Job once to start a compatible session.");
+      return false;
+    }
+    function completeStep() {
+      const step = session.steps[session.currentStep];
+      if (step && !step.completed) {
+        step.completed = true;
+        session.completedSteps++;
+        session.pendingStep = "";
+        session.pendingUrl = "";
+        saveSession(session);
+      }
+    }
+    function checkPage(snapshot, token, stage, fieldId) {
+      if (!guard(token)) return false;
+      const current = observePage(scanPageFields());
+      const change = comparePages(snapshot, current);
+      const detail = {
+        stage,
+        fieldId,
+        change,
+        urlChanged: snapshot.url !== current.url,
+        markerChanged: snapshot.marker !== current.marker,
+        headingChanged: snapshot.heading !== current.heading,
+        beforeFields: snapshot.fields.length,
+        afterFields: current.fields.length,
+        added: current.fields.filter((f) => !snapshot.fields.some((old) => old.id === f.id)).map((f) => f.id),
+        removed: snapshot.fields.filter((f) => !current.fields.some((next) => next.id === f.id)).map((f) => f.id),
+        questionsChanged: current.fields.filter((f) => snapshot.fields.some((old) => old.id === f.id && old.question !== f.question)).map((f) => f.id),
+        navigationClick: false
+      };
+      const observationKey = JSON.stringify([snapshot, current]);
+      if (JSON.stringify(snapshot) !== JSON.stringify(current) && observationKey !== lastObservationLog) {
+        lastObservationLog = observationKey;
+        session.lastPageChange = detail;
+        logger[change === "same" ? "info" : "warn"](`Workflow page observation changed: ${JSON.stringify(detail)}`);
+      }
+      if (change === "same") return true;
+      status("paused", stage === "field action" && change === "changed" ? "Page changed while filling a field. Inspect the current step before resuming." : `Page changed or became ambiguous during ${stage}. Inspect the current step before resuming.`);
+      return false;
+    }
+    async function settleFields(snapshot, token, stage = "form settling", fieldId) {
+      const deadline = Date.now() + navigationTimeoutMs;
+      let previous = "", stableSince = Date.now();
+      do {
+        if (!guard(token)) return false;
+        const fields = scanPageFields();
+        if (new Set(fields.map((f) => f.id)).size !== fields.length) {
+          status("paused", "Ambiguous duplicate field IDs. Fill this page manually.");
+          return false;
+        }
+        const change = comparePages(snapshot, observePage(fields));
+        if (change === "changed") return checkPage(snapshot, token, stage, fieldId);
+        const state = JSON.stringify(fields.map((f) => [f.id, questionIdentity(f), f.element.disabled, f.element.readOnly]));
+        if (state !== previous) {
+          previous = state;
+          stableSince = Date.now();
+        }
+        const loading = Array.from(document.querySelectorAll('[aria-busy="true"]')).some(isVisible2);
+        const questions = session.steps[session.currentStep]?.questions || {};
+        if (fields.some((f) => Object.hasOwn(questions, f.id) && questions[f.id] !== questionIdentity(f))) {
+          checkPage(snapshot, token, stage, fieldId);
+          if (!guard(token)) return false;
+          status("paused", "A question or its options changed. Inspect the page before resuming.");
+          return false;
+        }
+        const disabled = fields.some((f) => f.element.disabled && (!snapshot.fields.find((old) => old.id === f.id)?.disabled || Object.hasOwn(questions, f.id) && empty(f)));
+        if (change === "same" && !loading && !disabled && Date.now() - stableSince >= Math.min(settleMs, 200)) return checkPage(snapshot, token, stage, fieldId);
+        if (Date.now() >= deadline) break;
+        await delay2(Math.min(50, Math.max(1, deadline - Date.now())));
+      } while (true);
+      if (checkPage(snapshot, token, stage, fieldId)) status("paused", "Form fields are still changing or disabled. Inspect the page before resuming.");
+      return false;
+    }
     function validation(fields = scanFormFields2(), control = null) {
       const errors = inspectValidation(fields, control);
       for (const field of fields) {
@@ -2187,26 +2313,33 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
     }
     async function waitForNavigation(signature, token, afterClick) {
       const deadline = Date.now() + navigationTimeoutMs;
-      let lastSignature = signature, stableSince = Date.now();
+      let lastSignature = "", stableSince = Date.now();
       const stableMs = Math.min(transitionMs, 200);
       status("running", afterClick ? "Waiting for the next page to finish loading." : "Waiting for the page Continue button to become ready.");
       logger.info(`Navigation wait: ${afterClick ? "after click" : "button readiness"}, timeout=${navigationTimeoutMs}ms`);
       do {
-        if (!guard(token)) return "stopped";
+        if (!guard(token)) {
+          if (afterClick && token === generation && ["review", "confirmation"].includes(session.status)) completeStep();
+          return "stopped";
+        }
         const fields = scanFormFields2();
-        const current = pageSignature(fields);
-        if (current !== lastSignature) {
-          lastSignature = current;
+        const current = observePage(scanPageFields());
+        const state = JSON.stringify(current);
+        if (state !== lastSignature) {
+          lastSignature = state;
           stableSince = Date.now();
         }
+        const change = comparePages(signature, current, afterClick);
         const busy2 = Array.from(document.querySelectorAll('[aria-busy="true"]')).some(isVisible2);
         const control = findContinue();
         if (!busy2 && Date.now() - stableSince >= stableMs) {
-          if (current !== signature && fields.length) {
+          if (change === "changed" && fields.length) {
             logger.info(`Navigation wait: next step ready, ${fields.length} fields`);
+            if (afterClick) completeStep();
+            session.currentStep = "";
             return "changed";
           }
-          if (current === signature) {
+          if (change === "same") {
             if (inspectValidation(fields).length) return "validation";
             if (!afterClick && control && !isDisabled(control)) return "ready";
           }
@@ -2223,20 +2356,22 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
     async function applyAnswers(fields, answers, token, signature) {
       const byId = new Map(answers.map((a) => [a.fieldId, a]));
       for (const original of fields) {
-        if (!guard(token) || pageSignature(scanFormFields2()) !== signature) return false;
+        if (!await settleFields(signature, token, "before field action", original.id)) return false;
         const field = scanFormFields2().find((f) => f.id === original.id && f.label === original.label && f.type === original.type);
         const entry = byId.get(original.id);
-        if (!field || !entry || entry.value === "" || entry.value == null) continue;
+        if (!entry || entry.value === "" || entry.value == null) continue;
+        const replacement = scanFormFields2().find((f) => f.id === original.id);
+        const question = session.steps[session.currentStep]?.questions[original.id];
+        if (replacement && (!field || question && question !== questionIdentity(replacement))) {
+          status("paused", "A question or its options changed. Inspect the page before resuming.");
+          return false;
+        }
+        if (!field) continue;
         field.options = original.options;
         field.element.scrollIntoView?.({ block: "center", behavior: "instant" });
         const filled = await fillField(field, entry.value);
         await delay2(settleMs);
-        if (!guard(token)) return false;
-        if (pageSignature(scanFormFields2()) !== signature) {
-          logger.warn(`Page changed during field action: id=${field.id}, path=${window.location.pathname}`);
-          status("paused", "Page changed while filling a field. Inspect the current step before resuming.");
-          return false;
-        }
+        if (!await settleFields(signature, token, "field action", field.id)) return false;
         const live = scanFormFields2().find((f) => f.id === field.id && f.label === field.label);
         const verified = filled && live ? await verifyField(live, entry.value) : { verified: false };
         let exact = !["text", "textarea", "email", "tel", "url", "number", "contenteditable"].includes(field.type) || String(verified.actualValue ?? "").trim() === String(entry.value).trim();
@@ -2252,10 +2387,11 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
     async function request(fields, context, token, signature) {
       if (!guard(token)) return [];
       await harvestComboboxOptions(fields);
-      if (!guard(token) || pageSignature(scanFormFields2()) !== signature) return [];
+      if (!await settleFields(signature, token, "option harvesting")) return [];
       let response = await answer(normalizeFieldsForAI(fields), { jobContext: session.job, ...context });
-      if (!guard(token) || pageSignature(scanFormFields2()) !== signature) return [];
+      if (!await settleFields(signature, token, "AI response")) return [];
       if (response.answers.some((a) => a.searchQuery)) response = await resolveComboboxSearchAnswers(fields, response);
+      if (!await settleFields(signature, token, "option search")) return [];
       return response.answers;
     }
     async function repair(errors, step, token, signature) {
@@ -2290,6 +2426,7 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
     }
     async function tick() {
       if (busy || !session?.active || !runnable.has(session.status)) return;
+      if (!compatibleSession()) return;
       busy = true;
       const token = generation;
       try {
@@ -2305,21 +2442,35 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
             return;
           }
           const fields = scanFormFields2();
-          const signature = pageSignature(fields);
+          const signature = observePage(scanPageFields());
           if (new Set(fields.map((f) => f.id)).size !== fields.length) {
             status("paused", "Ambiguous duplicate field IDs. Fill this page manually.");
             return;
           }
           session.currentUrl = window.location.href;
           session.pendingUrl = "";
-          let step = session.steps[signature];
+          let step = session.steps[session.currentStep];
+          if (step && comparePages(step.observation, signature) === "ambiguous") {
+            status("paused", "The current step is ambiguous. Inspect the page and Capture Job to restart if needed.");
+            return;
+          }
+          if (!step || comparePages(step.observation, signature) !== "same") {
+            session.currentStep = pageSignature(scanPageFields());
+            step = session.steps[session.currentStep];
+          }
           if (!step) {
             results.clear();
-            step = session.steps[signature] = { primary: false, answers: {}, repairs: 0, clicks: 0 };
-            session.history.push({ url: window.location.href, signature, at: (/* @__PURE__ */ new Date()).toISOString() });
+            step = session.steps[session.currentStep] = { primary: false, answers: {}, questions: {}, lateRequests: 0, repairs: 0, clicks: 0, observation: signature };
+            session.history.push({ url: window.location.href, signature: session.currentStep, at: (/* @__PURE__ */ new Date()).toISOString() });
           }
+          step.observation = signature;
           status("running", `Application step ${session.history.length}. Repair attempts ${step.repairs}/2.`);
           if (!step.primary) {
+            for (const field of fields) {
+              const question = questionIdentity(field);
+              if (step.questions[field.id] && step.questions[field.id] !== question) delete step.answers[field.id];
+              step.questions[field.id] = question;
+            }
             const targets = fields.filter((f) => getSettings().overwriteExisting || empty(f));
             const missing = [];
             for (const field of targets) {
@@ -2336,7 +2487,7 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
               saveSession(session);
               status("running", `Generating answers for ${missing.length} fields.`);
               const answers = await request(missing, {}, token, signature);
-              if (!guard(token) || pageSignature(scanFormFields2()) !== signature) return;
+              if (!checkPage(signature, token, "primary response")) return;
               if (!answers.length) throw new Error("AI returned no usable answers. Resume to retry.");
               for (const entry of answers) step.answers[entry.fieldId] = entry;
             }
@@ -2347,7 +2498,30 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
             const missing = fields.filter(empty);
             if (missing.length && !await applyAnswers(missing, Object.values(step.answers), token, signature)) return;
           }
-          if (!guard(token) || pageSignature(scanFormFields2()) !== signature) continue;
+          if (!checkPage(signature, token, "fill completion")) return;
+          if (!await settleFields(signature, token)) return;
+          const late = scanFormFields2().filter((f) => !Object.hasOwn(step.questions, f.id));
+          if (late.length) {
+            if (step.lateRequests >= 2) {
+              status("paused", "Dynamic field limit reached (2/2). Inspect the page before resuming.");
+              return;
+            }
+            step.lateRequests++;
+            saveSession(session);
+            const targets = late.filter((f) => getSettings().overwriteExisting || empty(f));
+            if (targets.length) {
+              const answers = await request(targets, { allowSearch: false }, token, signature);
+              if (!guard(token)) return;
+              if (!answers.length) throw new Error("AI returned no usable late-field answers. Resume to retry.");
+              for (const entry of answers) step.answers[entry.fieldId] = entry;
+              for (const field of late) step.questions[field.id] = questionIdentity(field);
+              saveSession(session);
+              if (!await applyAnswers(targets, answers, token, signature)) return;
+            }
+            for (const field of late) step.questions[field.id] = questionIdentity(field);
+            saveSession(session);
+            continue;
+          }
           let control = findContinue();
           const errors = validation(scanFormFields2());
           if (errors.length) {
@@ -2373,6 +2547,12 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
             status("paused", "No unambiguous enabled Continue control. Continue manually.");
             return;
           }
+          if (!await settleFields(signature, token, "before navigation")) return;
+          control = findContinue();
+          if (!control || isDisabled(control)) {
+            status("paused", "Continue changed while preparing navigation. Inspect the page before resuming.");
+            return;
+          }
           if (step.clicks >= 3 || session.transitions >= 30) {
             status("paused", "Navigation limit reached. Continue manually.");
             return;
@@ -2382,6 +2562,7 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
           session.transitions++;
           session.pendingUrl = control.tagName === "A" ? safeUrl(control.getAttribute("href")) : safeUrl(control.getAttribute("formaction") || control.form?.getAttribute("action") || window.location.href);
           session.pendingAt = Date.now();
+          session.pendingStep = session.currentStep;
           status("running", "Continuing; waiting for the next step.");
           bindTab(session);
           logger.info(`Navigation action: ${control.textContent?.trim() || control.value || "Continue"}, path=${window.location.pathname}`);
@@ -2389,6 +2570,8 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
           const transition = await waitForNavigation(signature, token, true);
           if (transition === "stopped") return;
           if (transition === "changed") continue;
+          session.pendingStep = "";
+          session.pendingUrl = "";
           const rejected = inspectValidation(scanFormFields2());
           if (rejected.length && await repair(rejected, step, token, signature)) continue;
           if (!session.active) return;
@@ -2417,6 +2600,14 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
       async initialize() {
         session = await restoreSession();
         if (session) bindTab(session);
+        if (session && compatibleSession() && session.active && session.pendingStep === session.currentStep && Date.now() - session.pendingAt < 12e4) {
+          const previous = session.steps[session.currentStep];
+          const page = classifyPage();
+          if (previous && (["review", "confirmation"].includes(page.type) || comparePages(previous.observation, observePage(scanPageFields()), true) === "changed")) {
+            completeStep();
+            if (page.type === "application") session.currentStep = "";
+          }
+        }
         emit();
         const schedule = () => {
           clearTimeout(timer);
@@ -2439,6 +2630,7 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
         if (busy) return;
         generation++;
         if (job || !session) session = createSession(job || captureJob());
+        if (!compatibleSession()) return;
         session.active = true;
         status("running", "Starting application workflow.");
         await tick();
@@ -3557,7 +3749,7 @@ input:checked + .jc-slider:before {
     } else {
       wfBadgeHtml = `<span class="jc-wf-badge jc-wf-badge-idle">Not Started</span>`;
     }
-    const stepsCompleted = session ? session.history.length : 0;
+    const stepsCompleted = session?.completedSteps || 0;
     const fieldsAnswered = session ? Object.keys(session.answers).length : 0;
     const stepBarPercent = stepsCompleted > 0 ? Math.min(stepsCompleted * 25, 100) : 0;
     const stepBarClass = wfIsDone ? "wf-done" : wfIsRunning ? "wf-pulse" : "";
@@ -3912,6 +4104,7 @@ input:checked + .jc-slider:before {
   function renderDebugTab() {
     const state = getSanitizedState();
     const logs = logger.getLogs();
+    const lastPageChange = applicationState?.session?.lastPageChange;
     const logsHtml = logs.length === 0 ? '<span style="color: #64748b;">No debug logs recorded yet.</span>' : logs.slice().reverse().map((l) => {
       const time = l.timestamp.split("T")[1]?.slice(0, 8) || "";
       return `
@@ -3948,6 +4141,8 @@ input:checked + .jc-slider:before {
     </div>
 
     <div class="jc-card">
+      ${lastPageChange ? `<div class="jc-row"><span class="jc-card-title">Last Workflow Change</span></div>
+      <pre style="font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere;">${escapeHtml(JSON.stringify(lastPageChange, null, 2))}</pre>` : ""}
       <div class="jc-row">
         <span class="jc-card-title">Recent Activity Logs (${logs.length})</span>
         <button class="jc-btn jc-btn-secondary" id="jc-clear-logs-btn" style="padding: 4px 8px; font-size: 10px;">Clear</button>

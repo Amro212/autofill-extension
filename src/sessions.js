@@ -18,6 +18,7 @@ export function bindTab(session) {
 export function createSession(job) {
   const session = {
     id: globalThis.crypto.randomUUID(), job, currentUrl: window.location.href,
+    identityVersion: 2, completedSteps: 0, currentStep: '',
     history: [], answers: {}, errors: [], steps: {}, status: 'idle', reason: 'Ready to start.',
     active: false, createdAt: now(), updatedAt: now(), pendingUrl: '', transitions: 0,
   };

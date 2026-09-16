@@ -33,6 +33,395 @@ const render = html => { document.querySelector('main').innerHTML = html; };
 const input = (id = 'name', label = 'Full name') => `<label for="${id}">${label}</label><input id="${id}" required>`;
 const job = () => ({ title: 'Engineer', company: 'Example', listingUrl: 'https://example.com/jobs/42', applicationUrl: window.location.href });
 
+const workflowAnswers = async fields => ({ answers: fields.map(f => ({ fieldId: f.fieldId, value: 'Applicant' })) });
+
+test('same-step validation headings and changing accessible labels finish remaining fields', async () => {
+  render(`<h2>My Information</h2>${input('city', 'City')}${input('postal', 'Postal Code')}<button>Save and Continue</button>`);
+  let clicks = 0, requests = 0;
+  document.querySelector('#city').oninput = event => {
+    document.querySelector('main').insertAdjacentHTML('afterbegin', '<h3>Errors Found</h3>');
+    event.target.setAttribute('aria-label', 'City Applicant');
+  };
+  document.querySelector('button').onclick = () => {
+    clicks++;
+    assert.equal(document.querySelector('#postal').value, 'Applicant');
+    render('<h1>Review application</h1>');
+  };
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: async fields => { requests++; return workflowAnswers(fields); } });
+  try {
+    await engine.start(job());
+    assert.equal(engine.session.status, 'review');
+    assert.equal(clicks, 1);
+    assert.equal(requests, 1);
+    assert.equal(engine.session.completedSteps, 1);
+  } finally { engine.destroy(); }
+});
+
+test('conditional optional fields get a bounded late request within the original step', async () => {
+  render(`<h2>My Information</h2>${input('city', 'City')}<button>Continue</button>`);
+  document.querySelector('#city').oninput = () => {
+    if (!document.querySelector('#region')) document.querySelector('button').insertAdjacentHTML('beforebegin', '<label for="region">Region</label><input id="region">');
+  };
+  const batches = [];
+  document.querySelector('button').onclick = () => {
+    assert.equal(document.querySelector('#region').value, 'Applicant');
+    render('<h1>Review application</h1>');
+  };
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: async fields => { batches.push(fields.map(f => f.fieldId)); return workflowAnswers(fields); } });
+  try {
+    await engine.start(job());
+    assert.equal(engine.session.status, 'review');
+    assert.deepEqual(batches, [['city'], ['region']]);
+    assert.equal(engine.session.history.length, 1);
+    assert.equal(Object.values(engine.session.steps)[0].requests, 1);
+  } finally { engine.destroy(); }
+});
+
+test('temporarily disabled dependent field is filled before Continue', async () => {
+  render(`<h2>My Information</h2>${input('city', 'City')}${input('postal', 'Postal Code')}<button>Continue</button>`);
+  let enable, clicks = 0;
+  document.querySelector('#city').oninput = () => {
+    document.querySelector('#postal').disabled = true;
+    enable = setTimeout(() => { document.querySelector('#postal').disabled = false; }, 40);
+  };
+  document.querySelector('button').onclick = () => {
+    clicks++;
+    assert.equal(document.querySelector('#postal').value, 'Applicant');
+    render('<h1>Review application</h1>');
+  };
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 10, navigationTimeoutMs: 500, answer: workflowAnswers });
+  try {
+    await engine.start(job());
+    assert.equal(engine.session.status, 'review');
+    assert.equal(clicks, 1);
+    assert.equal(engine.session.history.length, 1);
+  } finally { clearTimeout(enable); engine.destroy(); }
+});
+
+test('heading-only post-click change does not create a step or an extra click', async () => {
+  render(`<h2>My Information</h2>${input()}<button>Continue</button>`);
+  let clicks = 0;
+  document.querySelector('button').onclick = () => {
+    clicks++;
+    document.querySelector('main').insertAdjacentHTML('afterbegin', '<h3>Errors Found</h3>');
+  };
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: workflowAnswers });
+  try {
+    await engine.start(job());
+    assert.equal(clicks, 1);
+    assert.equal(engine.session.history.length, 1);
+    assert.equal(engine.session.completedSteps, 0);
+    assert.match(engine.session.reason, /Continue did not change/);
+  } finally { engine.destroy(); }
+});
+
+test('Resume after same-step mutation reuses primary answers and completion stays zero', async () => {
+  render(`<h2>My Information</h2>${input('city', 'City')}${input('postal', 'Postal Code')}<button>Continue</button>`);
+  saveSettings({ autoContinue: false });
+  let requests = 0;
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: async fields => { requests++; return workflowAnswers(fields); } });
+  document.querySelector('#city').oninput = () => engine.pause();
+  try {
+    await engine.start(job());
+    document.querySelector('#city').oninput = null;
+    document.querySelector('main').insertAdjacentHTML('afterbegin', '<h3>Errors Found</h3>');
+    await engine.start();
+    assert.equal(document.querySelector('#postal').value, 'Applicant');
+    assert.equal(requests, 1);
+    assert.equal(engine.session.history.length, 1);
+    assert.equal(engine.session.completedSteps, 0);
+  } finally { engine.destroy(); }
+});
+
+test('question changed during AI response never receives the old answer', async () => {
+  render(`<h2>My Information</h2>${input('answer', 'City')}${input('postal', 'Postal Code')}<button>Continue</button>`);
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: async fields => {
+    document.querySelector('label[for=answer]').textContent = 'Salary';
+    return workflowAnswers(fields);
+  } });
+  try {
+    await engine.start(job());
+    assert.equal(document.querySelector('#answer').value, '');
+    assert.equal(engine.session.status, 'paused');
+    assert.match(engine.session.reason, /question.*changed|changed.*question/i);
+  } finally { engine.destroy(); }
+});
+
+test('markerless conditional fields stay on one step', async () => {
+  render(`${input('city', 'City')}<button>Continue</button>`);
+  document.querySelector('#city').oninput = () => {
+    if (!document.querySelector('#postal')) document.querySelector('button').insertAdjacentHTML('beforebegin', input('postal', 'Postal Code'));
+  };
+  document.querySelector('button').onclick = () => render('<h1>Review application</h1>');
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: workflowAnswers });
+  try {
+    await engine.start(job());
+    assert.equal(engine.session.status, 'review');
+    assert.equal(engine.session.history.length, 1);
+  } finally { engine.destroy(); }
+});
+
+test('legacy workflow sessions require recapture without replaying uncertain answers', async () => {
+  render(`${input()}<button>Continue</button>`);
+  const legacy = createSession(job());
+  delete legacy.identityVersion;
+  legacy.active = true;
+  legacy.status = 'running';
+  legacy.history = [{ signature: 'old', url: window.location.href }];
+  saveSession(legacy);
+  let requests = 0;
+  const engine = createApplicationEngine({ answer: async fields => { requests++; return workflowAnswers(fields); } });
+  try {
+    await engine.initialize();
+    await engine.start();
+    assert.equal(requests, 0);
+    assert.equal(engine.session.status, 'paused');
+    assert.match(engine.session.reason, /capture job/i);
+  } finally { engine.destroy(); }
+});
+
+test('same-step asynchronous rerender settles before continuing saved answers', async () => {
+  render(`<h2>My Information</h2><section id="fields">${input('city', 'City')}${input('postal', 'Postal Code')}</section><button>Continue</button>`);
+  let restore;
+  document.querySelector('#city').oninput = () => {
+    document.querySelector('#fields').innerHTML = '';
+    restore = setTimeout(() => {
+      document.querySelector('#fields').innerHTML = `${input('city', 'City')}${input('postal', 'Postal Code')}`;
+      document.querySelector('#city').value = 'Applicant';
+    }, 40);
+  };
+  document.querySelector('button').onclick = () => {
+    assert.equal(document.querySelector('#postal').value, 'Applicant');
+    render('<h1>Review application</h1>');
+  };
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 10, navigationTimeoutMs: 300, answer: workflowAnswers });
+  try {
+    await engine.start(job());
+    assert.equal(engine.session.status, 'review');
+    assert.equal(engine.session.history.length, 1);
+  } finally { clearTimeout(restore); engine.destroy(); }
+});
+
+test('active step marker cannot make an empty rerender look ready', async () => {
+  render(`<span aria-current="step">My Information</span><section id="fields">${input('city', 'City')}${input('postal', 'Postal Code')}</section><button>Continue</button>`);
+  let restore, postalAtClick;
+  document.querySelector('#city').oninput = () => {
+    document.querySelector('#fields').innerHTML = '';
+    restore = setTimeout(() => {
+      document.querySelector('#fields').innerHTML = `${input('city', 'City')}${input('postal', 'Postal Code')}`;
+      document.querySelector('#city').value = 'Applicant';
+    }, 40);
+  };
+  document.querySelector('button').onclick = () => {
+    postalAtClick = document.querySelector('#postal')?.value;
+    render('<h1>Review application</h1>');
+  };
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 10, navigationTimeoutMs: 300, answer: workflowAnswers });
+  try {
+    await engine.start(job());
+    assert.equal(postalAtClick, 'Applicant');
+    assert.equal(engine.session.status, 'review');
+  } finally { clearTimeout(restore); engine.destroy(); }
+});
+
+test('late request failure can resume without forgetting optional pending fields', async () => {
+  render(`<h2>My Information</h2>${input('city', 'City')}<button>Continue</button>`);
+  let lateCalls = 0;
+  document.querySelector('#city').oninput = () => document.querySelector('button').insertAdjacentHTML('beforebegin', '<label for="region">Region</label><input id="region">');
+  document.querySelector('button').onclick = () => {
+    assert.equal(document.querySelector('#region').value, 'Applicant');
+    render('<h1>Review application</h1>');
+  };
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: async fields => {
+    if (fields.some(f => f.fieldId === 'region') && ++lateCalls === 1) throw new Error('Temporary late-field request failure');
+    return workflowAnswers(fields);
+  } });
+  try {
+    await engine.start(job());
+    assert.equal(engine.session.status, 'paused');
+    await engine.start();
+    assert.equal(lateCalls, 2);
+    assert.equal(engine.session.status, 'review');
+    assert.equal(engine.session.history.length, 1);
+  } finally { engine.destroy(); }
+});
+
+test('dynamic field budget survives Resume and never advances unresolved additions', async () => {
+  render(`<h2>My Information</h2>${input('field0', 'Question 0')}<button>Continue</button>`);
+  let clicks = 0, requests = 0;
+  document.querySelector('button').onclick = () => clicks++;
+  document.querySelector('main').addEventListener('input', event => {
+    const n = Number(event.target.id.replace('field', '')) + 1;
+    if (!document.getElementById(`field${n}`)) document.querySelector('button').insertAdjacentHTML('beforebegin', input(`field${n}`, `Question ${n}`));
+  });
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: async fields => { requests++; return workflowAnswers(fields); } });
+  try {
+    await engine.start(job());
+    assert.match(engine.session.reason, /Dynamic field limit/);
+    await engine.start();
+    assert.match(engine.session.reason, /Dynamic field limit/);
+    assert.equal(requests, 3);
+    assert.equal(clicks, 0);
+    assert.equal(engine.session.history.length, 1);
+  } finally { engine.destroy(); }
+});
+
+test('same-URL real transition during AI response discards stale answers explicitly', async () => {
+  render(`<h2>My Information</h2>${input('answer', 'City')}<button>Continue</button>`);
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: async fields => {
+    render(`<h2>My Experience</h2>${input('answer', 'City')}<button>Continue</button>`);
+    return workflowAnswers(fields);
+  } });
+  try {
+    await engine.start(job());
+    assert.equal(document.querySelector('#answer').value, '');
+    assert.equal(engine.session.status, 'paused');
+    assert.match(engine.session.reason, /Page changed/);
+  } finally { engine.destroy(); }
+});
+
+test('baseline disabled controls do not prevent filling actionable questions', async () => {
+  render(`<h2>My Information</h2>${input('city', 'City')}<label for="country">Country</label><input id="country" disabled value="Canada"><button>Continue</button>`);
+  document.querySelector('button').onclick = () => render('<h1>Review application</h1>');
+  let requests = 0;
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: async fields => { requests++; return workflowAnswers(fields); } });
+  try {
+    await engine.start(job());
+    assert.equal(engine.session.status, 'review');
+    assert.equal(requests, 1);
+  } finally { engine.destroy(); }
+});
+
+test('duplicate field IDs revealed during filling prevent further writes and Continue', async () => {
+  render(`<h2>My Information</h2>${input('city', 'City')}${input('postal', 'Postal Code')}<button>Continue</button>`);
+  document.querySelector('#city').oninput = () => document.querySelector('button').insertAdjacentHTML('beforebegin', '<input id="postal">');
+  let clicks = 0;
+  document.querySelector('button').onclick = () => clicks++;
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: workflowAnswers });
+  try {
+    await engine.start(job());
+    assert.match(engine.session.reason, /duplicate field IDs/);
+    assert.equal(document.querySelector('#postal').value, '');
+    assert.equal(clicks, 0);
+  } finally { engine.destroy(); }
+});
+
+test('full reload after Continue counts verified advancement exactly once', async () => {
+  render(`<h2>My Information</h2>${input('city', 'City')}<button>Continue</button>`);
+  const first = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: workflowAnswers });
+  document.querySelector('button').onclick = () => first.destroy(); // document unload cancels the old run
+  await first.start(job());
+  render('<h1>Review application</h1>');
+  const restored = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: workflowAnswers });
+  try {
+    await restored.initialize();
+    assert.equal(restored.session.status, 'review');
+    assert.equal(restored.session.completedSteps, 1);
+    await restored.start();
+    assert.equal(restored.session.completedSteps, 1);
+  } finally { restored.destroy(); }
+});
+
+test('conditional hiding before a section heading does not change the step', async () => {
+  render(`<h3>My Information</h3>${input('city', 'City')}<h2>Address</h2>${input('postal', 'Postal Code')}<button>Continue</button>`);
+  document.querySelector('#city').oninput = event => { event.target.hidden = true; };
+  document.querySelector('button').onclick = () => render('<h1>Review application</h1>');
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: workflowAnswers });
+  try {
+    await engine.start(job());
+    assert.equal(engine.session.status, 'review');
+    assert.equal(engine.session.history.length, 1);
+  } finally { engine.destroy(); }
+});
+
+test('failed primary retry cannot bless a cached answer for a changed question', async () => {
+  render(`<h2>My Information</h2>${input('answer', 'Full name')}${input('other', 'Postal Code')}<button>Continue</button>`);
+  rememberAnswer(createSession(job()), { label: 'Full name', type: 'text', options: [] }, { value: 'Applicant' });
+  let calls = 0;
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: async () => {
+    if (++calls === 1) throw new Error('Temporary failure');
+    return { answers: [{ fieldId: 'other', value: '12345' }] };
+  } });
+  try {
+    await engine.start(job());
+    document.querySelector('label[for=answer]').textContent = 'Salary';
+    await engine.start();
+    assert.equal(document.querySelector('#answer').value, '');
+    assert.equal(Object.values(engine.session.steps)[0].answers.answer, undefined);
+  } finally { engine.destroy(); }
+});
+
+test('Resume on ambiguous markerless replacement preserves old step and requires inspection', async () => {
+  render(`${input('city', 'City')}<button>Continue</button>`);
+  saveSettings({ autoContinue: false });
+  let calls = 0;
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: async fields => { calls++; return workflowAnswers(fields); } });
+  try {
+    await engine.start(job());
+    render(`${input('new', 'Unrelated question')}<button>Continue</button>`);
+    await engine.start();
+    assert.equal(calls, 1);
+    assert.equal(engine.session.history.length, 1);
+    assert.match(engine.session.reason, /ambiguous/i);
+  } finally { engine.destroy(); }
+});
+
+test('Workday language selection with dynamic aria-label fills proficiency and continues', async () => {
+  render('<h2>My Experience</h2><label for="language">Language</label><button id="language" type="button" aria-label="Language Select One" aria-haspopup="listbox" aria-controls="options">Select One</button>' + input('reading', 'Reading') + '<button id="next" type="button">Save and Continue</button>');
+  const button = document.querySelector('#language');
+  button.onclick = () => {
+    document.querySelector('#options')?.remove();
+    document.querySelector('main').insertAdjacentHTML('beforeend', '<div id="options" role="listbox"><div role="option">English</div></div>');
+    document.querySelector('[role=option]').onclick = () => {
+      button.textContent = 'English';
+      button.setAttribute('aria-label', 'Language English');
+      document.querySelector('#options').remove();
+    };
+  };
+  let reading;
+  document.querySelector('#next').onclick = () => {
+    reading = document.querySelector('#reading').value;
+    render('<h1>Review application</h1>');
+  };
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: async fields => ({ answers: fields.map(f => ({ fieldId: f.fieldId, value: f.fieldId === 'language' ? 'English' : 'Fluent' })) }) });
+  try {
+    await engine.start(job());
+    assert.equal(engine.session.status, 'review');
+    assert.equal(reading, 'Fluent');
+    assert.equal(engine.session.history.length, 1);
+  } finally { engine.destroy(); }
+});
+
+test('transient listbox search controls do not become late applicant questions', async () => {
+  render(`<h2>My Information</h2>${input('city', 'City')}<button>Continue</button>`);
+  document.querySelector('#city').oninput = () => document.querySelector('main').insertAdjacentHTML('beforeend', '<div role="listbox"><label for="search">Search options</label><input id="search"></div>');
+  document.querySelector('button').onclick = () => render('<h1>Review application</h1>');
+  const batches = [];
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: async fields => { batches.push(fields.map(f => f.fieldId)); return workflowAnswers(fields); } });
+  try {
+    await engine.start(job());
+    assert.deepEqual(batches, [['city']]);
+    assert.equal(engine.session.status, 'review');
+  } finally { engine.destroy(); }
+});
+
+for (const changedBy of ['self', 'later field']) {
+  test(`question changed by ${changedBy} during filling pauses before Continue`, async () => {
+    render(`<h2>My Information</h2>${input('city', 'City')}${input('postal', 'Postal Code')}<button>Continue</button>`);
+    let clicks = 0;
+    document.querySelector(changedBy === 'self' ? '#city' : '#postal').oninput = () => {
+      document.querySelector('label[for=city]').textContent = 'Salary';
+    };
+    document.querySelector('button').onclick = () => clicks++;
+    const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: workflowAnswers });
+    try {
+      await engine.start(job());
+      assert.equal(clicks, 0);
+      assert.match(engine.session.reason, /question.*changed/i);
+    } finally { engine.destroy(); }
+  });
+}
+
 test('captures JSON-LD JobPosting and an explicit application link', () => {
   render('<h1>Engineer</h1><a href="/apply/42">Apply now</a><script type="application/ld+json">{"@type":"JobPosting","title":"Engineer","hiringOrganization":{"name":"Example"},"description":"<p>Build useful software.</p>","identifier":{"value":"42"}}</script>');
   const captured = captureJob();

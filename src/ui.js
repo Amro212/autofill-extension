@@ -1195,7 +1195,7 @@ function renderHomeTab() {
     wfBadgeHtml = `<span class="jc-wf-badge jc-wf-badge-idle">Not Started</span>`;
   }
 
-  const stepsCompleted = session ? session.history.length : 0;
+  const stepsCompleted = session?.completedSteps || 0;
   const fieldsAnswered = session ? Object.keys(session.answers).length : 0;
 
   // Step progress bar: show proportional fill; pulse when running
@@ -1584,6 +1584,7 @@ function renderSettingsTab() {
 function renderDebugTab() {
   const state = getSanitizedState();
   const logs = logger.getLogs();
+  const lastPageChange = applicationState?.session?.lastPageChange;
 
   const logsHtml = logs.length === 0
     ? '<span style="color: #64748b;">No debug logs recorded yet.</span>'
@@ -1624,6 +1625,8 @@ function renderDebugTab() {
     </div>
 
     <div class="jc-card">
+      ${lastPageChange ? `<div class="jc-row"><span class="jc-card-title">Last Workflow Change</span></div>
+      <pre style="font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere;">${escapeHtml(JSON.stringify(lastPageChange, null, 2))}</pre>` : ''}
       <div class="jc-row">
         <span class="jc-card-title">Recent Activity Logs (${logs.length})</span>
         <button class="jc-btn jc-btn-secondary" id="jc-clear-logs-btn" style="padding: 4px 8px; font-size: 10px;">Clear</button>

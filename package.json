@@ -1,6 +1,6 @@
 {
   "name": "job-copilot",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "Job Copilot — Tampermonkey userscript for AI job applications",
   "main": "dist/job-copilot.user.js",
   "type": "module",

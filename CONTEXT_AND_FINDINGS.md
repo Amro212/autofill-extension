@@ -109,6 +109,25 @@ This file tracks user-reported findings, platform bugs, audit analyses, and code
 
 ## Turn Change Log
 
+### Turn: 2026-09-15 — Manual sign-off: Phases 1, 2, and 3 marked complete
+
+- **User request**: "lets mark phase 1, 2, 3 as complete now"
+- **Status & Hard Gate Audit**:
+  - **Phase 1 (Foundation)**: All 6 gates passed (Tampermonkey userscript install, Shadow DOM UI isolation, GM storage persistence, OpenRouter secret isolation, AI connectivity test, panel stability).
+  - **Phase 2 (Generic Autofill)**: All 7 gates passed (comprehensive field scanning for text/textarea/select/radio/checkbox, unified AI page requests, DOM event dispatch & React state adherence, verification with exact persistence check, overwrite toggling, narrative rewrite, safe real-page execution).
+  - **Phase 3 (Application Engine)**: All 8 gates passed (job capture with JSON-LD & DOM fallback, durable multi-page session continuity across steps/refreshes, validation error detection & bounded semantic AI repair, automatic step progression with Auto Continue, clean review stop without unauthorized submission, CAPTCHA classification without blocking ordinary forms, assessment boundary protection, normalized global & session memory).
+  - **Profile Management & Polish**: Explicit structured fields for repetitive application questions (work authorization, sponsorship, notice period, compensation, demographics/EEOC), automatic source mapping to LinkedIn for discovery questions, and interruptible hard-quit pause mechanics for both single-page and multi-step forms.
+- **Changed**:
+  - `PHASE_3_REPORT.md`: Updated status to "Accepted & Signed off by user (Phases 1, 2, and 3 Complete)"; all 8 hard gates marked passed.
+  - `Job_Copilot_Tampermonkey_6_Phase_Kit/PHASE_1_FOUNDATION.md`: Checked off all 6 hard gates as passed and accepted.
+  - `Job_Copilot_Tampermonkey_6_Phase_Kit/PHASE_2_GENERIC_AUTOFILL.md`: Checked off all 7 hard gates as passed and accepted.
+  - `Job_Copilot_Tampermonkey_6_Phase_Kit/PHASE_3_APPLICATION_ENGINE.md`: Checked off all 8 hard gates as passed and accepted.
+  - Created git tags:
+    - `phase-1-foundation-pass`
+    - `phase-2-generic-autofill-pass`
+    - `phase-3-application-engine-pass`
+- **Next Phase**: Ready to begin **Phase 4: ATS Hardening** (Workday multi-step hardening, Lever section heading resolver, Ashby custom inputs, Greenhouse nested embeds).
+
 ### Turn: 2026-09-15 — Single-page autofill pause/stop button & hard-quit task commands
 
 - **User request**: Add a pause/stop button beside the single form page "Autofill This Page" button. Both pause buttons (single-page and multi-step) must act as hard quit task commands WITHOUT tampering with the progress made so far or forgetting memory and fields already filled.
@@ -235,3 +254,19 @@ This file tracks user-reported findings, platform bugs, audit analyses, and code
   - [CONTEXT_AND_FINDINGS.md](file:///c:/VScode/Autofill-Ext/CONTEXT_AND_FINDINGS.md) [MODIFY]: Updated turn log.
 - **Next Steps**:
   - Ready for Phase 2 tag and Phase 3 planning.
+### Turn: 2026-09-15 — Workday false page-change pause investigation (Phase 3)
+
+- **User report / environment**: RBC Workday application, userscript v0.3.8, after resume upload and successful Capture Job. Start / Resume partially fills My Information then pauses with "Page changed while filling a field" despite no observed navigation. Resume repeats the failure. After manual completion and Save and Continue, the following page also partially fills and pauses with the same error.
+- **Screenshot evidence**: My Information reports 18 fields; referral source, address line 1 and postal code remain blank; screenshots show validation messages and populated city/province. Next page reports 72 fields, with language proficiency selects still blank. Displayed steps completed rises 1 → 2 → 3 across attempts; these counts are not proof of navigation.
+- **Audit / root cause**: Confirmed `pageSignature` conflates step identity with mutable headings and ordered field IDs/labels/types. The same key gates field actions, keys persisted step/retry state and detects navigation. Deterministic JSDOM reproduction triggers the exact pause without navigation, leaves the next field blank with zero Continue clicks, and produces extra history/primary requests on Resume. A separate reproduction accepts a heading-only post-click change as navigation. UI counts history snapshots as completed steps. Screenshots do not establish the exact changed DOM property or whether a submit event occurred in the real run.
+- **Target**: Current Phase 3 application-engine correctness. User requests systematic investigation and a surgical fix proposal. Preserve Phase 2 compatibility and existing uncommitted documentation edits.
+- **Changed / rationale**: Added `docs/workday-page-change-investigation.md` (trace, evidence, narrow implementation proposal and acceptance matrix) and `docs/diagnostics/workday-page-change.mjs` (reproducible current-bug evidence). No runtime edits. Proposed separation of stable step identity from form snapshot, bounded same-step reconciliation, consistent transition guards, truthful metrics and compact change diagnostics.
+- **Verification / next**: Diagnostic passed its current-bug assertions; existing suite 79/79 passes. No live RBC or AI verification claimed. Next: implement the proposed Phase 3 correction with failing acceptance tests, preserve shared Phase 2 behavior, build and retest Workday. No commit/tag.
+### Turn: 2026-09-16 — Approved Workday step-tracking correction (Phase 3)
+
+- **User evidence / authorization**: User approved the investigation proposal and supplied Debug logs from v0.3.8 on RBC Workday. At 00:54:42 the engine selects English in `language-163--language`, then immediately logs `Page changed during field action` at the same application path. Proficiency comboboxes remain uncommitted. Logs confirm the failing action and unchanged logged path, but do not record the signature component that changed; earlier My Information actions are absent from the retained log.
+- **Target / plan**: Implement approved workflow correction: stable step identity, bounded same-step reconciliation, consistent stale-answer guards, truthful completion accounting and structural diagnostics. Protect Phase 2 shared primitives. Preserve prior phase sign-offs; this correction needs live Workday confirmation. No commit/tag requested.
+- **Changed / rationale**: `src/navigation.js` separates step evidence from field snapshots and adds workflow-only stable question labels; `src/application.js` settles same-step mutations, enforces question compatibility across AI/fill/navigation boundaries, handles at most two late-field requests per step, preserves retry budgets on Resume, excludes transient listbox inputs, logs structural changes and counts verified advancement. `src/sessions.js` versions identity and initializes completion state. `src/ui.js` displays verified completion counts and retained structural diagnostics. `tests/application.test.js` and `tests/panel.test.js` add 24 acceptance cases. Updated the diagnostic runner, investigation report, PHASE_3_REPORT.md, package/lock version and generated userscript v0.3.9.
+- **Independent review / corrections**: Read-only reviewer found baseline disabled controls blocking the run, incomplete primary retries retaining incompatible cached answers, conditional disappearance changing inferred heading, and post-fill semantic changes permitting Continue. Each was reproduced with a failing test and corrected; further cases cover duplicate IDs, empty rerenders with active-step markers, optional late-request failure recovery and full-reload completion accounting.
+- **Verification**: Initial eight regressions all failed against v0.3.8 and passed after the main correction. Final full suite: 103 passed, 0 failed. `npm run build` successfully produced `dist/job-copilot.user.js` v0.3.9. No shared Phase 2 scanner/label/filler/verifier edits. Existing staged documentation edits preserved.
+- **Next**: Install/reload v0.3.9, Capture Job once to replace legacy session identity, then Start / Resume with Auto Continue ON. Authenticated Workday/OpenRouter behavior not exercised here. If a pause remains, collect retained Last Workflow Change and recent Debug logs. No commit/tag.
