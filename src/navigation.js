@@ -55,11 +55,28 @@ export function comparePages(before, after, afterClick = false) {
 }
 
 export function findContinue(doc = document) {
-  const candidates = Array.from(doc.querySelectorAll('button,input[type=submit],input[type=button],a[href],[role=button]')).filter(isVisible).filter(el => {
+  return inspectContinue(doc).control;
+}
+
+export function inspectContinue(doc = document) {
+  const matches = Array.from(doc.querySelectorAll('button,input[type=submit],input[type=button],a[href],[role=button]')).filter(isVisible).filter(el => {
     const label = visibleText(el) || el.value || el.getAttribute('aria-label') || '';
     return /^(?:next(?: step)?|continue|save (?:and|&) continue|review(?: application)?|proceed)$/i.test(label.trim());
   });
-  return candidates.length === 1 ? candidates[0] : null;
+  const candidates = matches.filter(el => {
+    // Step destinations are not forward actions. Phenom exposes these as a
+    // toolbar with stepnum markers; ordinary action toolbars remain eligible.
+    return !el.closest('[role=tablist]') &&
+      !el.closest('[role=toolbar]')?.querySelector('[stepnum],[aria-current=step]');
+  });
+  const control = candidates.length === 1 ? candidates[0] : null;
+  let reason = '';
+  if (!candidates.length) reason = `No Next or Continue button found.${matches.length ? ' Application progress controls were excluded.' : ''} Continue manually.`;
+  else if (candidates.length > 1) {
+    const labels = candidates.slice(0, 5).map(el => (visibleText(el) || el.value || el.getAttribute('aria-label')).trim());
+    reason = `Multiple forward buttons found: ${labels.join(', ')}${candidates.length > 5 ? ', …' : ''}. Continue manually.`;
+  } else if (isDisabled(control)) reason = 'The page’s Continue button is disabled. Wait for the page or check required fields.';
+  return { control, reason };
 }
 export function pageSignature(fields, doc = document) {
   const page = observePage(fields, doc);

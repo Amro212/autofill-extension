@@ -35,6 +35,72 @@ const job = () => ({ title: 'Engineer', company: 'Example', listingUrl: 'https:/
 
 const workflowAnswers = async fields => ({ answers: fields.map(f => ({ fieldId: f.fieldId, value: 'Applicant' })) });
 
+// Structure observed on RBC's Phenom Apply frontend, without applicant data.
+const phenomProgress = '<div role="toolbar"><li role="button" atm-id="applicationReview"><a tabindex="-1"><span stepnum="applicationReview"></span><span>Review</span></a></li></div>';
+
+test('Phenom progress Review does not compete with the form Next button', () => {
+  render(`${phenomProgress}<div class="navigation"><button id="next" type="submit">Next</button></div>`);
+  assert.equal(findContinue(), document.querySelector('#next'));
+});
+
+test('progress-only Review is never used as a forward action', () => {
+  render(phenomProgress);
+  assert.equal(findContinue(), null);
+  render('<div role="tablist"><button role="tab">Review</button></div>');
+  assert.equal(findContinue(), null);
+});
+
+test('real Review actions and ordinary action toolbars remain supported', () => {
+  for (const label of ['Review', 'Review Application', 'Next', 'Save and Continue', 'Continue']) {
+    render(`<div role="toolbar"><button id="forward">${label}</button></div>`);
+    assert.equal(findContinue(), document.querySelector('#forward'));
+  }
+});
+
+test('Phenom navigation preserves disabled state, hidden filtering and real ambiguity', () => {
+  render(`${phenomProgress}<button id="next" disabled>Next</button><button hidden>Next</button>`);
+  assert.equal(findContinue(), document.querySelector('#next'));
+  assert.equal(findContinue().disabled, true);
+  document.querySelector('main').insertAdjacentHTML('beforeend', '<button>Continue</button>');
+  assert.equal(findContinue(), null);
+});
+
+test('Phenom workflow clicks Next, never progress Review, then stops before submission', async () => {
+  render(`<h2>My experience</h2>${phenomProgress}${input()}<button id="next" type="button">Next</button>`);
+  let nextClicks = 0, progressClicks = 0, submissions = 0;
+  document.querySelector('[atm-id]').onclick = () => progressClicks++;
+  document.querySelector('#next').onclick = () => {
+    nextClicks++;
+    assert.equal(document.querySelector('#name').value, 'Applicant');
+    render('<h1>Review application</h1><button>Submit application</button>');
+    document.querySelector('button').onclick = () => submissions++;
+  };
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: workflowAnswers });
+  try {
+    await engine.start(job());
+    assert.equal(engine.session.status, 'review');
+    assert.equal(nextClicks, 1);
+    assert.equal(progressClicks, 0);
+    assert.equal(submissions, 0);
+    assert.equal(engine.session.completedSteps, 1);
+  } finally { engine.destroy(); }
+});
+
+test('navigation pause distinguishes competing forward actions from missing controls', async () => {
+  for (const [controls, expected] of [
+    ['<button>Next</button><button>Continue</button>', /Multiple forward buttons found: Next, Continue/],
+    [phenomProgress, /No Next or Continue button found.*progress/i],
+  ]) {
+    render(`${input()}${controls}`);
+    const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: workflowAnswers });
+    try {
+      await engine.start(job());
+      assert.equal(engine.session.status, 'paused');
+      assert.match(engine.session.reason, expected);
+    } finally { engine.destroy(); }
+  }
+});
+
 test('same-step validation headings and changing accessible labels finish remaining fields', async () => {
   render(`<h2>My Information</h2>${input('city', 'City')}${input('postal', 'Postal Code')}<button>Save and Continue</button>`);
   let clicks = 0, requests = 0;

@@ -2,7 +2,7 @@ import { captureJob, safeUrl } from './jobs.js';
 import { createSession, restoreSession, saveSession, bindTab } from './sessions.js';
 import { classifyPage, isVisible } from './pageClassifier.js';
 import { inspectValidation } from './validation.js';
-import { findContinue, pageSignature, isDisabled, observePage, comparePages, workflowLabel, questionIdentity } from './navigation.js';
+import { findContinue, inspectContinue, pageSignature, isDisabled, observePage, comparePages, workflowLabel, questionIdentity } from './navigation.js';
 import { rememberAnswer, recallAnswer } from './memory.js';
 import { getSettings } from './storage.js';
 import { scanFormFields as scanAllFields, harvestComboboxOptions } from './fields/scanner.js';
@@ -337,10 +337,10 @@ export function createApplicationEngine({ answer = generateAutofillAnswers, onCh
           if (readiness === 'timeout') { pauseDisabledButton(); return; }
           control = findContinue();
         }
-        if (!control || isDisabled(control)) { status('paused', 'No unambiguous enabled Continue control. Continue manually.'); return; }
+        if (!control || isDisabled(control)) { status('paused', inspectContinue().reason); return; }
         if (!await settleFields(signature, token, 'before navigation')) return;
         control = findContinue();
-        if (!control || isDisabled(control)) { status('paused', 'Continue changed while preparing navigation. Inspect the page before resuming.'); return; }
+        if (!control || isDisabled(control)) { status('paused', `Continue changed while preparing navigation. ${inspectContinue().reason}`); return; }
         if (step.clicks >= 3 || session.transitions >= 30) { status('paused', 'Navigation limit reached. Continue manually.'); return; }
         if (!guard(token)) return;
         step.clicks++;

@@ -40,3 +40,4 @@ Every agent interacting with this repository **MUST** maintain and update [CONTE
 15. **Bounded Retries**: Use bounded retries. Never create an infinite fill/navigation loop.
 16. **License Preservation**: Preserve license notices for directly reused MIT/BSD code.
 17. **Manual Phase Sign-off**: Commit/tag only after the user manually accepts a phase.
+18. **No Unrequested Files**: Do not create miscellaneous markdown or other files unless explicitly requested. Only add or modify files when directly instructed.

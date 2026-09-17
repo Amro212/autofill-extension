@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Job Copilot
 // @namespace    https://github.com/Amro212/autofill-extension
-// @version      0.3.9
+// @version      0.3.10
 // @description  Job Copilot — Tampermonkey userscript for AI job applications
 // @author       Job Copilot Team
 // @updateURL    https://raw.githubusercontent.com/Amro212/autofill-extension/main/dist/job-copilot.user.js
@@ -100,7 +100,7 @@
   }
 
   // src/constants.js
-  var APP_VERSION = true ? "0.3.9" : "0.3.0";
+  var APP_VERSION = true ? "0.3.10" : "0.3.0";
   var APP_NAME = "Job Copilot";
   var STORAGE_KEYS = {
     SETTINGS: "jc:settings",
@@ -2112,11 +2112,24 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
     return "ambiguous";
   }
   function findContinue(doc = document) {
-    const candidates = Array.from(doc.querySelectorAll("button,input[type=submit],input[type=button],a[href],[role=button]")).filter(isVisible2).filter((el) => {
+    return inspectContinue(doc).control;
+  }
+  function inspectContinue(doc = document) {
+    const matches = Array.from(doc.querySelectorAll("button,input[type=submit],input[type=button],a[href],[role=button]")).filter(isVisible2).filter((el) => {
       const label = visibleText(el) || el.value || el.getAttribute("aria-label") || "";
       return /^(?:next(?: step)?|continue|save (?:and|&) continue|review(?: application)?|proceed)$/i.test(label.trim());
     });
-    return candidates.length === 1 ? candidates[0] : null;
+    const candidates = matches.filter((el) => {
+      return !el.closest("[role=tablist]") && !el.closest("[role=toolbar]")?.querySelector("[stepnum],[aria-current=step]");
+    });
+    const control = candidates.length === 1 ? candidates[0] : null;
+    let reason = "";
+    if (!candidates.length) reason = `No Next or Continue button found.${matches.length ? " Application progress controls were excluded." : ""} Continue manually.`;
+    else if (candidates.length > 1) {
+      const labels = candidates.slice(0, 5).map((el) => (visibleText(el) || el.value || el.getAttribute("aria-label")).trim());
+      reason = `Multiple forward buttons found: ${labels.join(", ")}${candidates.length > 5 ? ", \u2026" : ""}. Continue manually.`;
+    } else if (isDisabled(control)) reason = "The page\u2019s Continue button is disabled. Wait for the page or check required fields.";
+    return { control, reason };
   }
   function pageSignature(fields, doc = document) {
     const page = observePage(fields, doc);
@@ -2544,13 +2557,13 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
             control = findContinue();
           }
           if (!control || isDisabled(control)) {
-            status("paused", "No unambiguous enabled Continue control. Continue manually.");
+            status("paused", inspectContinue().reason);
             return;
           }
           if (!await settleFields(signature, token, "before navigation")) return;
           control = findContinue();
           if (!control || isDisabled(control)) {
-            status("paused", "Continue changed while preparing navigation. Inspect the page before resuming.");
+            status("paused", `Continue changed while preparing navigation. ${inspectContinue().reason}`);
             return;
           }
           if (step.clicks >= 3 || session.transitions >= 30) {
