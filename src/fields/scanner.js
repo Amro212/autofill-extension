@@ -1,6 +1,9 @@
 import { FIELD_TYPES, UI_IDS } from '../constants.js';
 import { extractLabel, extractGroupLabel, extractOptionLabel, extractDescription } from './labels.js';
 import { logger } from '../debug.js';
+import { getProfile } from '../storage.js';
+import { isResidenceLabel, locationMatches } from '../location.js';
+import { isLeverLocation } from './combobox.js';
 import { COMBO, discoverComboboxOptions, optionData, readComboboxSelection, resolveComboboxParts, openCombobox, closeCombobox, setComboboxSearch, waitForComboboxOptions } from './combobox.js';
 
 let fieldCounter = 0;
@@ -79,7 +82,7 @@ export function scanFormFields(root = document) {
     const typeAttr = (el.getAttribute('type') || '').toLowerCase();
 
     // Skip non-fillable inputs
-    const isCombobox = el.matches(COMBO);
+    const isCombobox = el.matches(COMBO) || isLeverLocation(el);
     if (typeAttr === 'hidden' || typeAttr === 'submit' || (typeAttr === 'button' && !isCombobox) || typeAttr === 'reset' || typeAttr === 'image' || typeAttr === 'password' || typeAttr === 'file') {
       continue;
     }
@@ -300,6 +303,7 @@ export function scanFormFields(root = document) {
  * for remote results. Search queries are cleared without committing a selection.
  */
 export async function harvestComboboxOptions(fields, searchQueries = new Map()) {
+  const profileLocation = getProfile().location?.trim();
   // Re-harvest even previously discovered options: an open menu may be filtered.
   for (const field of fields.filter(field => field.type === FIELD_TYPES.COMBOBOX)) {
     const element = field.element;
@@ -308,8 +312,13 @@ export async function harvestComboboxOptions(fields, searchQueries = new Map()) 
     let ownsSearch;
     try {
       await openCombobox(element);
-      ownsSearch = setComboboxSearch(input, searchQueries.get(field.id) || '');
-      field.options = (await waitForComboboxOptions(element)).map(optionData);
+      const query = searchQueries.get(field.id) || (isResidenceLabel(field.label) ? profileLocation : '') || '';
+      // Search by city so provider formatting/abbreviations do not suppress
+      // suggestions; retain every supplied region/country for final matching.
+      const search = isLeverLocation(element) || isResidenceLabel(field.label) ? query.split(',')[0].trim() : query;
+      ownsSearch = setComboboxSearch(input, search);
+      field.options = (await waitForComboboxOptions(element, undefined, isResidenceLabel(field.label) ? query : undefined)).map(optionData);
+      if (query && isResidenceLabel(field.label)) field.options = field.options.filter(option => locationMatches(option.label, query));
       logger.info(`Harvest[${field.id}]: ${field.options.length} owned options`);
     } catch (err) {
       field.options = [];

@@ -64,6 +64,8 @@ export function extractLabel(element) {
   // 4. Check wrapping <label>
   const parentLabel = element.closest('label');
   if (parentLabel && parentLabel.textContent) {
+    const applicationLabel = parentLabel.querySelector('.application-label');
+    if (applicationLabel) return cleanText(applicationLabel.textContent).replace(/[✱*]+\s*$/, '').trim();
     const clone = parentLabel.cloneNode(true);
     const inputs = clone.querySelectorAll('input, select, textarea');
     inputs.forEach((input) => input.remove());

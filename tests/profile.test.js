@@ -26,6 +26,18 @@ test('legacy profiles gain unset fields without losing their context', () => {
   assert.equal(profile.applicantNotes, 'Personal notes');
 });
 
+test('residence grounding recognizes Canadian abbreviations without choosing another Toronto', async () => {
+  saveProfile({ location: 'Toronto, Ontario' });
+  const field = { fieldId: 'residence', label: 'Current location', type: 'combobox', options: [
+    { label: 'Toronto, OH, USA' }, { label: 'Toronto, ON, CAN' }, { label: 'Toronto, Durham, England, GBR' },
+  ] };
+  const { answers } = await generateAutofillAnswers([field]);
+  assert.equal(answers[0].value, 'Toronto, ON, CAN');
+  saveProfile({ location: 'Toronto' });
+  const ambiguous = await generateAutofillAnswers([field]);
+  assert.equal(ambiguous.answers[0].value, '');
+});
+
 test('explicit current location uses full profile location and rejects other cities', async () => {
   saveProfile({ location: 'London, Ontario, Canada' });
   respond([{ fieldId: 'residence', value: 'London, UK' }]);
