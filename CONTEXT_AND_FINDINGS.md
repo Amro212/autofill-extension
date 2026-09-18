@@ -6,6 +6,14 @@ This file tracks user-reported findings, platform bugs, audit analyses, and code
 
 ## Findings & Bug Reports
 
+### Turn: 2026-09-16 — Approved location autocomplete lifecycle correction
+
+- **Authorization / scope**: User approved surgical fixes from the prior research. Shared asynchronous dropdown correctness plus narrowly recognized current-residence grounding; no speculative ATS adapters or external services.
+- **Reproductions**: Ten tests initially failed for stale location suggestions, results delayed 3.3 seconds, superseded searches, detached controls, standard autocomplete attributes without role, slow commitment, blur rejection, clearing committed input, and profile-location grounding. Two additional tests reproduced cleanup erasing a newer query and preselected values bypassing post-blur checks.
+- **Implementation**: `src/fields/combobox.js` tracks query generations, checks relevance and stability, allows 8-second active searches / 3-second initial discovery, aborts changed/detached waits, and verifies stable valid selections for up to 2.5 seconds. `scanner.js` recognizes standard autocomplete attributes and guards cleanup ownership. `fillers.js` rechecks owned live options, checks selection after blur, and preserves committed display/newer queries. `verify.js` uses bounded stable verification. `profile.js` grounds explicit current-residence comboboxes in the full existing profile.location; duplicate/absent matches stay unresolved. Plain text and ambiguous employer/Location labels keep their existing handling.
+- **Tests / docs**: Modified `tests/autofill.test.js`, `tests/profile.test.js`; added `docs/plans/2026-09-16-location-autocomplete.md`. Initial full suite 119/119 passed before two follow-up fixes; final validation pending below. No commit/tag.
+- **Limits**: Query-term relevance and DOM stability cannot prove request provenance; no real failing ATS URL supplied. No new provider-specific commit adapters, geocoding, or universal compatibility claim. Full normalized location matching deliberately does not guess region abbreviations or infer residence from work eligibility.
+
 ### Entry: 2026-09-16 — Intermittent location autocomplete selection
 
 - **Phase / environment**: Shared location/combobox investigation across Greenhouse, Lever, Ashby; current build v0.3.10. Cross-platform hardening relates to Phase 4; this turn requests research and an adaptation proposal.
@@ -144,6 +152,12 @@ This file tracks user-reported findings, platform bugs, audit analyses, and code
 ---
 
 ## Turn Change Log
+
+### Turn: 2026-09-17 — Extension conversion feasibility study (no runtime change)
+
+- **User request**: Study whether the current Tampermonkey stack can convert to a Chrome/Firefox extension, what refactor is required, agentic effort, new capabilities, and whether bot-detection stays equivalent.
+- **Audit**: Current product is a single esbuild IIFE (`src/main.js` → `dist/job-copilot.user.js`) using GM storage, `GM_xmlhttpRequest`, `GM_getTab`/`GM_saveTab`, a top-window-only Shadow DOM panel, and isolated-world-style native input setters. Field engine, application controller, AI, profile, and navigation do not depend on Tampermonkey-specific DOM behavior. Known product gap: top-window guard skips cross-origin Greenhouse embeds.
+- **Conclusion recorded for later agents**: Parity conversion is a runtime-shell swap, not a field-engine rewrite. Biggest code change is async storage plus background-script OpenRouter proxy (required for Firefox CSP). Bot detection should remain equivalent if the fill model stays DOM events in a content script and we avoid `chrome.debugger`, header spoofing, and MAIN-world globals. Largest unique extension win is invisible cross-frame `runtime` messaging for embeds. No code, build, or commit this turn.
 
 ### Turn: 2026-09-15 — Manual sign-off: Phases 1, 2, and 3 marked complete
 
@@ -306,3 +320,10 @@ This file tracks user-reported findings, platform bugs, audit analyses, and code
 - **Independent review / corrections**: Read-only reviewer found baseline disabled controls blocking the run, incomplete primary retries retaining incompatible cached answers, conditional disappearance changing inferred heading, and post-fill semantic changes permitting Continue. Each was reproduced with a failing test and corrected; further cases cover duplicate IDs, empty rerenders with active-step markers, optional late-request failure recovery and full-reload completion accounting.
 - **Verification**: Initial eight regressions all failed against v0.3.8 and passed after the main correction. Final full suite: 103 passed, 0 failed. `npm run build` successfully produced `dist/job-copilot.user.js` v0.3.9. No shared Phase 2 scanner/label/filler/verifier edits. Existing staged documentation edits preserved.
 - **Next**: Install/reload v0.3.9, Capture Job once to replace legacy session identity, then Start / Resume with Auto Continue ON. Authenticated Workday/OpenRouter behavior not exercised here. If a pause remains, collect retained Last Workflow Change and recent Debug logs. No commit/tag.
+### Turn: 2026-09-16 — Phase 3 continuation and Resume rejection
+
+- **Environment / report**: Cisco v0.3.11. User reports forward navigation followed by ambiguous-step rejection on Start / Resume. Screenshots show My Information and Application Questions; successful upload appears as warning. Attached scan log does not include transition diagnostics.
+- **Root causes reproduced**: Persisted-step ambiguity explicitly rejects Resume; post-click complete form replacement with a shared heading is not accepted; every ARIA alert is treated as validation failure.
+- **Target / changes**: Phase 3. Update navigation, application controller and validation; regressions in application tests. Explicit Resume rescans the current form; replacement steps get distinct state even with a shared heading; informational alerts do not block navigation. Existing unrelated uncommitted edits preserved.
+- **Verification**: Three targeted regressions failed before fixes and passed afterward. Five regression cases now cover markerless Resume, shared-heading Resume, automatic replacement-form progression, informational upload alerts and required-field help text. Full suite passed 128/128 with test concurrency 1; earlier concurrent and isolated runs exposed timing sensitivity in the existing location-cancellation test. No shared Phase 2 runtime edits in this turn. Final alert refinement preserves arbitrary server rejection wording; targeted checks and all 69 application tests pass on the final code. Build produced v0.3.13; package/lock and generated userscript updated.
+- **Next / limits**: Install v0.3.13, reload and use Start / Resume with Auto Continue on; no recapture needed for the reported ambiguity. Live authenticated Cisco/OpenRouter acceptance remains unverified. No commit/tag.

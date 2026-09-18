@@ -417,7 +417,7 @@ test('failed primary retry cannot bless a cached answer for a changed question',
   } finally { engine.destroy(); }
 });
 
-test('Resume on ambiguous markerless replacement preserves old step and requires inspection', async () => {
+test('Resume accepts markerless replacement and fills the current page', async () => {
   render(`${input('city', 'City')}<button>Continue</button>`);
   saveSettings({ autoContinue: false });
   let calls = 0;
@@ -426,9 +426,9 @@ test('Resume on ambiguous markerless replacement preserves old step and requires
     await engine.start(job());
     render(`${input('new', 'Unrelated question')}<button>Continue</button>`);
     await engine.start();
-    assert.equal(calls, 1);
-    assert.equal(engine.session.history.length, 1);
-    assert.match(engine.session.reason, /ambiguous/i);
+    assert.equal(calls, 2);
+    assert.equal(engine.session.history.length, 2);
+    assert.equal(document.querySelector('#new').value, 'Applicant');
   } finally { engine.destroy(); }
 });
 
@@ -949,3 +949,47 @@ test('Pause acts as a hard quit without tampering with filled fields or forgetti
   engine.destroy();
 });
 
+
+test('same-heading replacement after Continue advances and ignores upload success alert', async () => {
+  render(`<h1>Engineer application</h1>${input('city', 'City')}<button>Continue</button>`);
+  let calls = 0;
+  document.querySelector('button').onclick = () => {
+    render(`<h1>Engineer application</h1><div role="alert">Resume.pdf successfully uploaded</div>${input('education', 'Education')}<button>Continue</button>`);
+    document.querySelector('button').onclick = () => render('<h1>Review application</h1>');
+  };
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: async fields => { calls++; return workflowAnswers(fields); } });
+  try {
+    await engine.start(job());
+    assert.equal(engine.session.status, 'review');
+    assert.equal(calls, 2);
+    assert.equal(engine.session.completedSteps, 2);
+  } finally { engine.destroy(); }
+});
+
+test('upload success alerts are informational but error alerts still block', () => {
+  render('<div role="alert">Resume.pdf successfully uploaded</div>');
+  assert.deepEqual(inspectValidation([]), []);
+  render('<div role="alert">That email is already registered.</div>');
+  assert.equal(inspectValidation([]).length, 1);
+  render('<div role="alert">Upload failed. Please try again.</div>');
+  assert.equal(inspectValidation([]).length, 1);
+});
+
+test('described required-field guidance is not a validation error for a filled field', () => {
+  render('<label for="name">Name</label><input id="name" required value="Applicant" aria-describedby="help"><div id="help">Required. Please enter your full name.</div>');
+  assert.deepEqual(inspectValidation(scanFormFields()), []);
+});
+
+test('Resume with a shared heading fills a replacement form without recapture', async () => {
+  render(`<h1>Engineer application</h1>${input('city', 'City')}<button>Continue</button>`);
+  saveSettings({ autoContinue: false });
+  const engine = createApplicationEngine({ settleMs: 0, transitionMs: 0, answer: workflowAnswers });
+  try {
+    await engine.start(job());
+    render(`<h1>Engineer application</h1>${input('education', 'Education')}<button>Continue</button>`);
+    await engine.start();
+    assert.equal(document.querySelector('#education').value, 'Applicant');
+    assert.equal(engine.session.history.length, 2);
+    assert.equal(engine.session.completedSteps, 0);
+  } finally { engine.destroy(); }
+});

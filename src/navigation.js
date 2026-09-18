@@ -50,7 +50,7 @@ export function comparePages(before, after, afterClick = false) {
   const overlap = before.fields.some(a => after.fields.some(b => a.id === b.id || a.question === b.question));
   if (overlap) return 'same';
   // Complete replacement without a step marker is evidence only after our click.
-  if (afterClick && !before.marker && !after.marker && before.fields.length && after.fields.length && !(before.heading && after.heading)) return 'changed';
+  if (afterClick && !before.marker && !after.marker && before.fields.length && after.fields.length) return 'changed';
   return 'ambiguous';
 }
 

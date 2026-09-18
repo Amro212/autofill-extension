@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Job Copilot
 // @namespace    https://github.com/Amro212/autofill-extension
-// @version      0.3.10
+// @version      0.3.13
 // @description  Job Copilot — Tampermonkey userscript for AI job applications
 // @author       Job Copilot Team
 // @updateURL    https://raw.githubusercontent.com/Amro212/autofill-extension/main/dist/job-copilot.user.js
@@ -76,6 +76,16 @@
   }
   function fixedProfileAnswer(field, profile, { allowSearch = true } = {}) {
     const label = normalize(field.label);
+    if (field.type === "combobox" && /^(?:current location|your current location|where are you (?:currently )?(?:located|based)|location of residence)$/.test(label) && profile.location?.trim()) {
+      const location = profile.location.trim();
+      const matches2 = (field.options || []).filter((option) => normalize(option.label) === normalize(location));
+      return {
+        fieldId: field.fieldId,
+        value: matches2.length === 1 ? matches2[0].label : "",
+        inferred: false,
+        ...!matches2.length && allowSearch ? { searchQuery: location } : {}
+      };
+    }
     const source = /^(?:how (?:did|do) you (?:hear|learn) about\b|where did you (?:hear about|find|learn about|see) (?:us|this (?:job|role|position|opportunity|opening)|(?:the|our) (?:job|company|role|position|opportunity|opening))\b|(?:application|applicant|referral|recruitment|job) source$|source$)/.test(label);
     let key2;
     if (/^(?:what (?:is|are) your |your |please (?:select|specify|indicate) your )?(?:gender(?: identity)?|pronouns|race(?: (?:and )?ethnicity)?|ethnicity|disability(?: status)?|veteran(?: status)?)(?: optional)?$/.test(label)) {
@@ -100,7 +110,7 @@
   }
 
   // src/constants.js
-  var APP_VERSION = true ? "0.3.10" : "0.3.0";
+  var APP_VERSION = true ? "0.3.13" : "0.3.0";
   var APP_NAME = "Job Copilot";
   var STORAGE_KEYS = {
     SETTINGS: "jc:settings",
@@ -375,11 +385,12 @@
   var logger = new DebugLogger();
 
   // src/fields/combobox.js
-  var COMBO = '[role="combobox"], button[aria-haspopup="listbox"]';
+  var COMBO = '[role="combobox"], button[aria-haspopup="listbox"], input[aria-autocomplete="list"], input[aria-autocomplete="both"]';
   var MENU = '[role="listbox"], .select__menu, [class*="menu-list"]';
   var OPTION = '[role="option"], .select__option';
   var VALUE = '.select__single-value, [class*="singleValue"], [class*="single-value"], .select__multi-value__label, [class*="multiValueLabel"], [class*="multi-value__label"]';
   var countryLabelsByInput = /* @__PURE__ */ new WeakMap();
+  var searchesByInput = /* @__PURE__ */ new WeakMap();
   function countryDisplayKey(node) {
     const flag = node.querySelector(".iti__flag");
     const countryClass = flag && Array.from(flag.classList).find((name) => /^iti__[a-z]{2}$/.test(name));
@@ -433,6 +444,7 @@
     return matches.length === 1 ? matches[0] : null;
   }
   function readComboboxSelection(element) {
+    if (!element?.isConnected) return [];
     const { container, input } = resolveComboboxParts(element);
     const labels = countryLabelsByInput.get(input || element);
     const values = Array.from(container.querySelectorAll(VALUE)).map((node) => labels?.get(countryDisplayKey(node)) || node.textContent.trim()).filter(Boolean);
@@ -448,12 +460,17 @@
     return discoverComboboxOptions(element).filter((option) => option.getAttribute("aria-selected") === "true").map((option) => optionData(option).label);
   }
   function setComboboxSearch(input, value) {
-    if (!input || input.value === value) return;
+    if (!input) return () => true;
+    const search = { query: value };
+    searchesByInput.set(input, search);
+    const ownsSearch = () => input.isConnected && searchesByInput.get(input) === search && input.value === value;
+    if (input.value === value) return ownsSearch;
     const setter = Object.getOwnPropertyDescriptor(input.ownerDocument.defaultView.HTMLInputElement.prototype, "value")?.set;
     if (setter) setter.call(input, value);
     else input.value = value;
     input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
     input.dispatchEvent(new KeyboardEvent("keyup", { key: value ? value.slice(-1) : "Backspace", bubbles: true, composed: true }));
+    return ownsSearch;
   }
   function closeCombobox(element) {
     const { input } = resolveComboboxParts(element);
@@ -480,17 +497,44 @@
     await delay(80);
     if (!getComboboxMenus(element).length && toggleBtn) clickFieldControl(toggleBtn);
   }
-  async function waitForComboboxOptions(element, timeoutMs = 3e3) {
-    const deadline = Date.now() + timeoutMs;
-    await delay(150);
+  async function waitForComboboxOptions(element, timeoutMs) {
+    const { input } = resolveComboboxParts(element);
+    const search = input && searchesByInput.get(input);
+    const query = input?.value || "";
+    const words = optionKey(query).match(/[\p{L}\p{N}]+/gu) || [];
+    const deadline = Date.now() + (timeoutMs ?? (query ? 8e3 : 3e3));
+    let previous = "", stableSince = Date.now();
     do {
+      if (!element.isConnected || input && (!input.isConnected || input.value !== query || searchesByInput.get(input) !== search)) return [];
       const menus = getComboboxMenus(element);
-      const loading = menus.some((menu) => menu.getAttribute("aria-busy") === "true" || /\bloading\b/i.test(menu.textContent));
-      const options = discoverComboboxOptions(element);
-      if (!loading && options.length) return options;
+      const loading = element.getAttribute("aria-busy") === "true" || menus.some((menu) => menu.getAttribute("aria-busy") === "true" || /\bloading\b/i.test(menu.textContent));
+      const options = discoverComboboxOptions(element).filter((option) => {
+        const text = optionKey(option.textContent);
+        return words.every((word) => text.includes(word));
+      });
+      const signature = JSON.stringify(options.map(optionData));
+      if (loading || signature !== previous) {
+        stableSince = Date.now();
+        previous = signature;
+      }
+      if (!loading && options.length && Date.now() - stableSince >= 200) return options;
       await delay(100);
     } while (Date.now() < deadline);
     return [];
+  }
+  async function waitForComboboxSelection(element, target, timeoutMs = 2500) {
+    const deadline = Date.now() + timeoutMs;
+    let stableSince = null;
+    do {
+      if (!element?.isConnected) return false;
+      const valid = element.getAttribute("aria-invalid") !== "true" && element.validity?.valid !== false;
+      const matches = valid && readComboboxSelection(element).some((value) => optionKey(value) === optionKey(target));
+      if (!matches) stableSince = null;
+      else if (stableSince === null) stableSince = Date.now();
+      else if (Date.now() - stableSince >= 200) return true;
+      await delay(50);
+    } while (Date.now() < deadline);
+    return false;
   }
 
   // src/ai.js
@@ -1029,7 +1073,7 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
       return false;
     }
     const style = window.getComputedStyle(el);
-    return style.display !== "none" && style.visibility !== "hidden" && (parseFloat(style.opacity) > 0 || el.getAttribute("role") === "combobox");
+    return style.display !== "none" && style.visibility !== "hidden" && (parseFloat(style.opacity) > 0 || el.matches(COMBO));
   }
   function isInsideCopilot(el) {
     return Boolean(el.closest(`#${UI_IDS.CONTAINER}`) || el.closest(`#${UI_IDS.INLINE_REWRITE}`));
@@ -1083,7 +1127,7 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
       if (processedElements.has(el)) continue;
       const tagName = el.tagName.toLowerCase();
       const typeAttr = (el.getAttribute("type") || "").toLowerCase();
-      const isCombobox = el.matches('[role="combobox"],button[aria-haspopup="listbox"]');
+      const isCombobox = el.matches(COMBO);
       if (typeAttr === "hidden" || typeAttr === "submit" || typeAttr === "button" && !isCombobox || typeAttr === "reset" || typeAttr === "image" || typeAttr === "password" || typeAttr === "file") {
         continue;
       }
@@ -1219,7 +1263,7 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
         });
         continue;
       }
-      if (el.getAttribute("role") === "combobox" || el.getAttribute("aria-haspopup") === "listbox") {
+      if (isCombobox || el.getAttribute("aria-haspopup") === "listbox") {
         processedElements.add(el);
         const label2 = extractLabel(el);
         const description2 = extractDescription(el);
@@ -1271,17 +1315,20 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
       const element = field.element;
       if (!element) continue;
       const { input } = resolveComboboxParts(element);
+      let ownsSearch;
       try {
         await openCombobox(element);
-        setComboboxSearch(input, searchQueries.get(field.id) || "");
+        ownsSearch = setComboboxSearch(input, searchQueries.get(field.id) || "");
         field.options = (await waitForComboboxOptions(element)).map(optionData);
         logger.info(`Harvest[${field.id}]: ${field.options.length} owned options`);
       } catch (err) {
         field.options = [];
         logger.warn(`Harvest[${field.id}]: ${err.message}`);
       } finally {
-        setComboboxSearch(input, "");
-        closeCombobox(element);
+        if (ownsSearch?.()) {
+          if (!readComboboxSelection(element).length) setComboboxSearch(input, "");
+          closeCombobox(element);
+        }
       }
     }
     return fields;
@@ -1549,18 +1596,25 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
     }
     const target = known?.label || String(targetValue);
     const { input } = resolveComboboxParts(element);
+    let ownsSearch;
     try {
-      if (readComboboxSelection(element).some((value) => optionKey(value) === optionKey(target))) return true;
+      if (readComboboxSelection(element).some((value) => optionKey(value) === optionKey(target))) {
+        closeCombobox(element);
+        return await waitForComboboxSelection(element, target);
+      }
       await openCombobox(element);
-      setComboboxSearch(input, "");
+      ownsSearch = setComboboxSearch(input, "");
       let options = await waitForComboboxOptions(element);
+      if (!ownsSearch()) return false;
       let match = findExactOption(options.map((option) => ({ ...optionData(option), element: option })), target);
       if (!match && known && input) {
-        setComboboxSearch(input, known.label);
+        ownsSearch = setComboboxSearch(input, known.label);
         options = await waitForComboboxOptions(element);
+        if (!ownsSearch()) return false;
         match = findExactOption(options.map((option) => ({ ...optionData(option), element: option })), target);
       }
-      if (!match) {
+      if (match) match = findExactOption(discoverComboboxOptions(element).map((option) => ({ ...optionData(option), element: option })), target);
+      if (!match || !element.isConnected) {
         logger.warn(`Fill[${element.id}]: no exact owned option for "${target}"`);
         return false;
       }
@@ -1569,17 +1623,18 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
       match.element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
       match.element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, button: 0 }));
       clickFieldControl(match.element);
-      for (let attempt = 0; attempt < 10; attempt++) {
-        if (readComboboxSelection(element).some((value) => optionKey(value) === optionKey(target))) return true;
-        await delay(100);
-      }
-      return false;
+      if (!await waitForComboboxSelection(element, target)) return false;
+      closeCombobox(element);
+      return await waitForComboboxSelection(element, target);
     } catch (err) {
       logger.warn(`Fill[${element.id}]: ${err.message}`);
       return false;
     } finally {
-      setComboboxSearch(input, "");
-      closeCombobox(element);
+      const selected = readComboboxSelection(element).length > 0;
+      if (!ownsSearch || ownsSearch()) {
+        if (!selected && element.isConnected && ownsSearch?.()) setComboboxSearch(input, "");
+        closeCombobox(element);
+      }
     }
   }
   function fillContentEditable(element, value) {
@@ -1708,10 +1763,9 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
     if (!element) {
       return { verified: false, actualValue: "", error: "Element missing" };
     }
+    const verified = await waitForComboboxSelection(element, expectedValue);
     const result = _checkComboboxState(element, expectedValue);
-    if (result.verified) return result;
-    await new Promise((r) => setTimeout(r, 120));
-    return _checkComboboxState(element, expectedValue);
+    return { ...result, verified, error: verified ? void 0 : result.error || "Combobox selection did not remain valid and stable" };
   }
   function _checkComboboxState(element, expectedValue) {
     const values = readComboboxSelection(element);
@@ -2108,7 +2162,7 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
     if (before.heading && after.heading && before.heading !== after.heading) return "changed";
     const overlap = before.fields.some((a) => after.fields.some((b) => a.id === b.id || a.question === b.question));
     if (overlap) return "same";
-    if (afterClick && !before.marker && !after.marker && before.fields.length && after.fields.length && !(before.heading && after.heading)) return "changed";
+    if (afterClick && !before.marker && !after.marker && before.fields.length && after.fields.length) return "changed";
     return "ambiguous";
   }
   function findContinue(doc = document) {
@@ -2140,6 +2194,13 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
   }
 
   // src/validation.js
+  function isErrorMessage(node) {
+    if (node.matches(".error,.field-error,.validation-error,.error-message,[data-error]")) return true;
+    if (!node.matches("[role=alert]")) return false;
+    const text = visibleText(node);
+    if (/\b(?:error|invalid|failed|failure|rejected|required|missing|must|cannot|unable)\b/i.test(text)) return true;
+    return !/\b(?:successfully (?:uploaded|saved)|(?:upload|save) (?:complete|successful)|uploading|saving)\b/i.test(text);
+  }
   function inspectValidation(fields, control = null, doc = document) {
     const errors = [];
     const owned = /* @__PURE__ */ new Set();
@@ -2150,12 +2211,12 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
       const nodes = ids.map((id) => doc.getElementById(id)).filter((node) => node && isVisible2(node));
       const invalid = el.getAttribute("aria-invalid") === "true" || el.validity?.valid === false;
       const missing = field.required && (field.type === "checkbox" ? !el.checked : field.type === "radio" ? !(field.elements || [el]).some((r) => r.checked) : !String(field.currentValue ?? "").trim());
-      const messages = nodes.filter((node) => invalid || node.matches("[role=alert],.error,.field-error,[data-error]"));
+      const messages = nodes.filter((node) => invalid || isErrorMessage(node));
       messages.forEach((node) => owned.add(node));
       if (invalid || missing || messages.some((node) => visibleText(node))) errors.push({ fieldId: field.id, label: field.label, kind: el.getAttribute("aria-invalid") === "true" || messages.length ? "semantic" : "native", message: messages.map(visibleText).filter(Boolean).join(" ") || el.validationMessage || "Required value missing or rejected." });
     }
     for (const el of doc.querySelectorAll("[role=alert],.field-error,.validation-error,.error-message,[data-error]")) {
-      if (!isVisible2(el) || owned.has(el) || !visibleText(el)) continue;
+      if (!isVisible2(el) || owned.has(el) || !visibleText(el) || !isErrorMessage(el)) continue;
       const container = el.closest(".form-group,.field,.form-field,fieldset,[data-field]");
       const candidates = container ? fields.filter((field2) => container.contains(field2.element)) : [];
       const field = candidates.length === 1 ? candidates[0] : null;
@@ -2463,13 +2524,13 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
           session.currentUrl = window.location.href;
           session.pendingUrl = "";
           let step = session.steps[session.currentStep];
-          if (step && comparePages(step.observation, signature) === "ambiguous") {
-            status("paused", "The current step is ambiguous. Inspect the page and Capture Job to restart if needed.");
-            return;
-          }
           if (!step || comparePages(step.observation, signature) !== "same") {
             session.currentStep = pageSignature(scanPageFields());
             step = session.steps[session.currentStep];
+            if (step && comparePages(step.observation, signature) !== "same") {
+              session.currentStep += JSON.stringify(signature.fields.map((f) => [f.id, f.question]));
+              step = session.steps[session.currentStep];
+            }
           }
           if (!step) {
             results.clear();

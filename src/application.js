@@ -256,13 +256,14 @@ export function createApplicationEngine({ answer = generateAutofillAnswers, onCh
         session.currentUrl = window.location.href;
         session.pendingUrl = '';
         let step = session.steps[session.currentStep];
-        if (step && comparePages(step.observation, signature) === 'ambiguous') {
-          status('paused', 'The current step is ambiguous. Inspect the page and Capture Job to restart if needed.');
-          return;
-        }
         if (!step || comparePages(step.observation, signature) !== 'same') {
           session.currentStep = pageSignature(scanPageFields());
           step = session.steps[session.currentStep];
+          // A shared page heading must not reuse answers or retry state from another form.
+          if (step && comparePages(step.observation, signature) !== 'same') {
+            session.currentStep += JSON.stringify(signature.fields.map(f => [f.id, f.question]));
+            step = session.steps[session.currentStep];
+          }
         }
         if (!step) {
           results.clear();

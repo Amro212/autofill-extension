@@ -1,7 +1,7 @@
 import { FIELD_TYPES, UI_IDS } from '../constants.js';
 import { extractLabel, extractGroupLabel, extractOptionLabel, extractDescription } from './labels.js';
 import { logger } from '../debug.js';
-import { discoverComboboxOptions, optionData, readComboboxSelection, resolveComboboxParts, openCombobox, closeCombobox, setComboboxSearch, waitForComboboxOptions } from './combobox.js';
+import { COMBO, discoverComboboxOptions, optionData, readComboboxSelection, resolveComboboxParts, openCombobox, closeCombobox, setComboboxSearch, waitForComboboxOptions } from './combobox.js';
 
 let fieldCounter = 0;
 
@@ -15,7 +15,7 @@ function isVisible(el) {
   }
   const style = window.getComputedStyle(el);
   return style.display !== 'none' && style.visibility !== 'hidden' &&
-    (parseFloat(style.opacity) > 0 || el.getAttribute('role') === 'combobox');
+    (parseFloat(style.opacity) > 0 || el.matches(COMBO));
 }
 
 function isInsideCopilot(el) {
@@ -79,7 +79,7 @@ export function scanFormFields(root = document) {
     const typeAttr = (el.getAttribute('type') || '').toLowerCase();
 
     // Skip non-fillable inputs
-    const isCombobox = el.matches('[role="combobox"],button[aria-haspopup="listbox"]');
+    const isCombobox = el.matches(COMBO);
     if (typeAttr === 'hidden' || typeAttr === 'submit' || (typeAttr === 'button' && !isCombobox) || typeAttr === 'reset' || typeAttr === 'image' || typeAttr === 'password' || typeAttr === 'file') {
       continue;
     }
@@ -240,7 +240,7 @@ export function scanFormFields(root = document) {
     }
 
     // 6. Custom Combobox [role="combobox"] or aria-haspopup="listbox"
-    if (el.getAttribute('role') === 'combobox' || el.getAttribute('aria-haspopup') === 'listbox') {
+    if (isCombobox || el.getAttribute('aria-haspopup') === 'listbox') {
       processedElements.add(el);
       const label = extractLabel(el);
       const description = extractDescription(el);
@@ -305,17 +305,20 @@ export async function harvestComboboxOptions(fields, searchQueries = new Map()) 
     const element = field.element;
     if (!element) continue;
     const { input } = resolveComboboxParts(element);
+    let ownsSearch;
     try {
       await openCombobox(element);
-      setComboboxSearch(input, searchQueries.get(field.id) || '');
+      ownsSearch = setComboboxSearch(input, searchQueries.get(field.id) || '');
       field.options = (await waitForComboboxOptions(element)).map(optionData);
       logger.info(`Harvest[${field.id}]: ${field.options.length} owned options`);
     } catch (err) {
       field.options = [];
       logger.warn(`Harvest[${field.id}]: ${err.message}`);
     } finally {
-      setComboboxSearch(input, '');
-      closeCombobox(element);
+      if (ownsSearch?.()) {
+        if (!readComboboxSelection(element).length) setComboboxSearch(input, '');
+        closeCombobox(element);
+      }
     }
   }
   return fields;

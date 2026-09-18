@@ -1,7 +1,7 @@
 import { FIELD_TYPES } from '../constants.js';
 import { extractOptionLabel } from './labels.js';
 import { logger } from '../debug.js';
-import { optionKey, findExactOption, optionData, resolveComboboxParts, readComboboxSelection, openCombobox, closeCombobox, setComboboxSearch, waitForComboboxOptions, delay, clickFieldControl } from './combobox.js';
+import { optionKey, findExactOption, optionData, resolveComboboxParts, readComboboxSelection, discoverComboboxOptions, openCombobox, closeCombobox, setComboboxSearch, waitForComboboxOptions, waitForComboboxSelection, clickFieldControl } from './combobox.js';
 
 function setNativeInputValue(element, value) {
   try {
@@ -245,19 +245,27 @@ export async function fillCombobox(element, targetValue, knownOptions) {
   }
   const target = known?.label || String(targetValue);
   const { input } = resolveComboboxParts(element);
+  let ownsSearch;
   try {
-    if (readComboboxSelection(element).some(value => optionKey(value) === optionKey(target))) return true;
+    if (readComboboxSelection(element).some(value => optionKey(value) === optionKey(target))) {
+      closeCombobox(element);
+      return await waitForComboboxSelection(element, target);
+    }
     await openCombobox(element);
-    setComboboxSearch(input, '');
+    ownsSearch = setComboboxSearch(input, '');
     let options = await waitForComboboxOptions(element);
+    if (!ownsSearch()) return false;
     let match = findExactOption(options.map(option => ({ ...optionData(option), element: option })), target);
     // Search only for an option already harvested from this field (async/virtual menus).
     if (!match && known && input) {
-      setComboboxSearch(input, known.label);
+      ownsSearch = setComboboxSearch(input, known.label);
       options = await waitForComboboxOptions(element);
+      if (!ownsSearch()) return false;
       match = findExactOption(options.map(option => ({ ...optionData(option), element: option })), target);
     }
-    if (!match) {
+    // Resolve the option again after waiting; async menus can replace nodes.
+    if (match) match = findExactOption(discoverComboboxOptions(element).map(option => ({ ...optionData(option), element: option })), target);
+    if (!match || !element.isConnected) {
       logger.warn(`Fill[${element.id}]: no exact owned option for "${target}"`);
       return false;
     }
@@ -266,18 +274,23 @@ export async function fillCombobox(element, targetValue, knownOptions) {
     match.element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
     match.element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0 }));
     clickFieldControl(match.element);
-    for (let attempt = 0; attempt < 10; attempt++) {
-      if (readComboboxSelection(element).some(value => optionKey(value) === optionKey(target))) return true;
-      await delay(100);
-    }
-    return false;
+    if (!await waitForComboboxSelection(element, target)) return false;
+    closeCombobox(element);
+    // The site's blur handler can reject or clear an apparent selection.
+    return await waitForComboboxSelection(element, target);
   } catch (err) {
     logger.warn(`Fill[${element.id}]: ${err.message}`);
     return false;
   } finally {
-    // Clear search residue without changing committed values or multi-select chips.
-    setComboboxSearch(input, '');
-    closeCombobox(element);
+    // Some controls display their committed location in the search input itself.
+    // Clearing that value fires a new search and may erase the saved selection.
+    const selected = readComboboxSelection(element).length > 0;
+    // A prior chip does not authorize cleanup of a newer search. Successful
+    // commits are already blurred and checked above before returning.
+    if (!ownsSearch || ownsSearch()) {
+      if (!selected && element.isConnected && ownsSearch?.()) setComboboxSearch(input, '');
+      closeCombobox(element);
+    }
   }
 }
 
