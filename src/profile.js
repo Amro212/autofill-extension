@@ -62,6 +62,13 @@ function matchesDemographicOption(key, value, label) {
 // questions remain grounded by the AI rather than being replaced by a short value.
 export function fixedProfileAnswer(field, profile, { allowSearch = true } = {}) {
   const label = normalize(field.label);
+  // Only explicit residence questions: bare "Location" can refer to an employer.
+  if (field.type === 'combobox' && /^(?:current location|your current location|where are you (?:currently )?(?:located|based)|location of residence)$/.test(label) && profile.location?.trim()) {
+    const location = profile.location.trim();
+    const matches = (field.options || []).filter(option => normalize(option.label) === normalize(location));
+    return { fieldId: field.fieldId, value: matches.length === 1 ? matches[0].label : '', inferred: false,
+      ...(!matches.length && allowSearch ? { searchQuery: location } : {}) };
+  }
   const source = /^(?:how (?:did|do) you (?:hear|learn) about\b|where did you (?:hear about|find|learn about|see) (?:us|this (?:job|role|position|opportunity|opening)|(?:the|our) (?:job|company|role|position|opportunity|opening))\b|(?:application|applicant|referral|recruitment|job) source$|source$)/.test(label);
   let key;
   if (/^(?:what (?:is|are) your |your |please (?:select|specify|indicate) your )?(?:gender(?: identity)?|pronouns|race(?: (?:and )?ethnicity)?|ethnicity|disability(?: status)?|veteran(?: status)?)(?: optional)?$/.test(label)) {

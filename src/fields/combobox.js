@@ -1,9 +1,10 @@
 // Shared ownership and committed-state rules for scanning, harvesting and filling.
-const COMBO = '[role="combobox"], button[aria-haspopup="listbox"]';
+export const COMBO = '[role="combobox"], button[aria-haspopup="listbox"], input[aria-autocomplete="list"], input[aria-autocomplete="both"]';
 const MENU = '[role="listbox"], .select__menu, [class*="menu-list"]';
 const OPTION = '[role="option"], .select__option';
 const VALUE = '.select__single-value, [class*="singleValue"], [class*="single-value"], .select__multi-value__label, [class*="multiValueLabel"], [class*="multi-value__label"]';
 const countryLabelsByInput = new WeakMap();
+const searchesByInput = new WeakMap();
 
 function countryDisplayKey(node) {
   const flag = node.querySelector('.iti__flag');
@@ -72,6 +73,7 @@ export function findExactOption(options, target) {
 }
 
 export function readComboboxSelection(element) {
+  if (!element?.isConnected) return [];
   const { container, input } = resolveComboboxParts(element);
   const labels = countryLabelsByInput.get(input || element);
   // Greenhouse renders the selected phone country as a flag plus dial code only.
@@ -92,12 +94,18 @@ export function readComboboxSelection(element) {
 }
 
 export function setComboboxSearch(input, value) {
-  if (!input || input.value === value) return;
+  if (!input) return () => true;
+  // Identity, not just text: a newer search may reuse the same query later.
+  const search = { query: value };
+  searchesByInput.set(input, search);
+  const ownsSearch = () => input.isConnected && searchesByInput.get(input) === search && input.value === value;
+  if (input.value === value) return ownsSearch;
   const setter = Object.getOwnPropertyDescriptor(input.ownerDocument.defaultView.HTMLInputElement.prototype, 'value')?.set;
   if (setter) setter.call(input, value);
   else input.value = value;
   input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
   input.dispatchEvent(new KeyboardEvent('keyup', { key: value ? value.slice(-1) : 'Backspace', bubbles: true, composed: true }));
+  return ownsSearch;
 }
 
 export function closeCombobox(element) {
@@ -130,17 +138,43 @@ export async function openCombobox(element) {
   if (!getComboboxMenus(element).length && toggleBtn) clickFieldControl(toggleBtn);
 }
 
-export async function waitForComboboxOptions(element, timeoutMs = 3000) {
-  const deadline = Date.now() + timeoutMs;
-  // Allow React to apply the query before inspecting the previously rendered list.
-  await delay(150);
+export async function waitForComboboxOptions(element, timeoutMs) {
+  const { input } = resolveComboboxParts(element);
+  const search = input && searchesByInput.get(input);
+  const query = input?.value || '';
+  const words = optionKey(query).match(/[\p{L}\p{N}]+/gu) || [];
+  const deadline = Date.now() + (timeoutMs ?? (query ? 8000 : 3000));
+  let previous = '', stableSince = Date.now();
   do {
+    if (!element.isConnected || input && (!input.isConnected || input.value !== query || searchesByInput.get(input) !== search)) return [];
     const menus = getComboboxMenus(element);
-    const loading = menus.some(menu => menu.getAttribute('aria-busy') === 'true' || /\bloading\b/i.test(menu.textContent));
-    const options = discoverComboboxOptions(element);
-    if (!loading && options.length) return options;
+    const loading = element.getAttribute('aria-busy') === 'true' || menus.some(menu => menu.getAttribute('aria-busy') === 'true' || /\bloading\b/i.test(menu.textContent));
+    // A pre-existing list may belong to a previous request. Require relevance
+    // to every query term; never accept the first nonempty list blindly.
+    const options = discoverComboboxOptions(element).filter(option => {
+      const text = optionKey(option.textContent);
+      return words.every(word => text.includes(word));
+    });
+    const signature = JSON.stringify(options.map(optionData));
+    if (loading || signature !== previous) { stableSince = Date.now(); previous = signature; }
+    if (!loading && options.length && Date.now() - stableSince >= 200) return options;
     // Async menus can briefly display "No options" before the debounce starts.
     await delay(100);
   } while (Date.now() < deadline);
   return [];
+}
+
+export async function waitForComboboxSelection(element, target, timeoutMs = 2500) {
+  const deadline = Date.now() + timeoutMs;
+  let stableSince = null;
+  do {
+    if (!element?.isConnected) return false;
+    const valid = element.getAttribute('aria-invalid') !== 'true' && element.validity?.valid !== false;
+    const matches = valid && readComboboxSelection(element).some(value => optionKey(value) === optionKey(target));
+    if (!matches) stableSince = null;
+    else if (stableSince === null) stableSince = Date.now();
+    else if (Date.now() - stableSince >= 200) return true;
+    await delay(50);
+  } while (Date.now() < deadline);
+  return false;
 }

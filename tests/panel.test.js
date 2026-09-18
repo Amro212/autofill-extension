@@ -3,6 +3,34 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { JSDOM } from 'jsdom';
 
+test('workflow shows verified completion count and retained structural diagnostic', async () => {
+  const bundle = await build({ entryPoints: ['src/main.js'], bundle: true, format: 'iife', write: false });
+  const dom = new JSDOM('<body></body>', { url: 'https://example.com/apply', runScripts: 'dangerously' });
+  const storage = new Map([
+    ['jc:sessions', ['diagnostic']],
+    ['jc:sessions:diagnostic', {
+      id: 'diagnostic', identityVersion: 2, active: false, status: 'paused', reason: 'Paused',
+      currentUrl: 'https://example.com/apply', job: { title: 'Example' }, steps: {}, answers: {},
+      history: [{}, {}, {}], completedSteps: 1,
+      lastPageChange: { stage: 'field action', fieldId: 'language', change: 'same', beforeFields: 18, afterFields: 19, added: ['reading'], navigationClick: false },
+    }],
+  ]);
+  dom.window.GM_getValue = (key, fallback) => storage.get(key) ?? fallback;
+  dom.window.GM_setValue = (key, value) => storage.set(key, value);
+  dom.window.CSS = { escape: value => value };
+  try {
+    dom.window.eval(bundle.outputFiles[0].text);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const root = dom.window.document.querySelector('#job-copilot-root').shadowRoot;
+    root.querySelector('#jc-toggle-btn').click();
+    assert.match(root.textContent, /1\s+step completed/);
+    root.querySelector('[data-tab=debug]').click();
+    assert.match(root.textContent, /Last Workflow Change/);
+    assert.match(root.textContent, /"fieldId": "language"/);
+    assert.match(root.textContent, /"navigationClick": false/);
+  } finally { dom.window.close(); }
+});
+
 test('profile sections save and reload explicit answers while preserving legacy context', async () => {
   const bundle = await build({ entryPoints: ['src/main.js'], bundle: true, format: 'iife', write: false });
   const dom = new JSDOM('<body></body>', { url: 'https://example.com/apply', runScripts: 'dangerously' });

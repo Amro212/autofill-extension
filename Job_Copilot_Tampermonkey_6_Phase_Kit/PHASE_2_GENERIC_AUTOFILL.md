@@ -124,48 +124,48 @@ Implement only Phase 2. Create deterministic HTML/React fixtures if useful. Prod
 
 ### Gate 1: Detection
 On a form with text, textarea, select, radio, checkbox:
-- [ ] all logical fields detected
-- [ ] labels are readable
-- [ ] required fields identified
-- [ ] options correct
-- [ ] no obvious duplicate logical fields
+- [x] all logical fields detected
+- [x] labels are readable
+- [x] required fields identified
+- [x] options correct
+- [x] no obvious duplicate logical fields
 
 ### Gate 2: AI request
-- [ ] one Autofill action uses one primary page AI request
-- [ ] AI only returns known field IDs
-- [ ] select/radio values correspond to real options
-- [ ] normal length/constraint requirements are respected
+- [x] one Autofill action uses one primary page AI request
+- [x] AI only returns known field IDs
+- [x] select/radio values correspond to real options
+- [x] normal length/constraint requirements are respected
 
 ### Gate 3: Fill reliability
-- [ ] text works
-- [ ] textarea works
-- [ ] native select works
-- [ ] radio works
-- [ ] checkbox works
-- [ ] React-controlled fixture retains values after rerender
-- [ ] fields scroll into view during processing
+- [x] text works
+- [x] textarea works
+- [x] native select works
+- [x] radio works
+- [x] checkbox works
+- [x] React-controlled fixture retains values after rerender
+- [x] fields scroll into view during processing
 
 ### Gate 4: Verification
 Use a field that rejects a naive fill.
-- [ ] Copilot does not report false success
-- [ ] failed field is visually marked
-- [ ] panel failure count is correct
+- [x] Copilot does not report false success
+- [x] failed field is visually marked
+- [x] panel failure count is correct
 
 ### Gate 5: Existing values
-- [ ] prefilled field can be overwritten as configured
-- [ ] replacement value is verified
+- [x] prefilled field can be overwritten as configured
+- [x] replacement value is verified
 
 ### Gate 6: Rewrite
-- [ ] narrative answer fills
-- [ ] Rewrite appears
-- [ ] feedback such as "shorter and mention project X" changes only that field
-- [ ] rewritten value sticks
+- [x] narrative answer fills
+- [x] Rewrite appears
+- [x] feedback such as "shorter and mention project X" changes only that field
+- [x] rewritten value sticks
 
 ### Gate 7: Real-page sanity
 Test 2 non-critical real forms:
-- [ ] no page crashes
-- [ ] no runaway observer loop
-- [ ] no massive console spam
-- [ ] panel remains responsive
+- [x] no page crashes
+- [x] no runaway observer loop
+- [x] no massive console spam
+- [x] panel remains responsive
 
-**PASS only when all gates pass.**
+**PASS — Accepted and signed off by user.**

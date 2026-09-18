@@ -1,5 +1,5 @@
 import { FIELD_TYPES } from '../constants.js';
-import { readComboboxSelection, optionKey } from './combobox.js';
+import { readComboboxSelection, optionKey, waitForComboboxSelection } from './combobox.js';
 
 export async function verifyField(field, expectedValue) {
   if (!field || !field.element) {
@@ -103,12 +103,9 @@ export async function verifyCombobox(element, expectedValue) {
     return { verified: false, actualValue: '', error: 'Element missing' };
   }
 
+  const verified = await waitForComboboxSelection(element, expectedValue);
   const result = _checkComboboxState(element, expectedValue);
-  if (result.verified) return result;
-
-  // Retry after framework state settles (React setState is async)
-  await new Promise(r => setTimeout(r, 120));
-  return _checkComboboxState(element, expectedValue);
+  return { ...result, verified, error: verified ? undefined : result.error || 'Combobox selection did not remain valid and stable' };
 }
 
 function _checkComboboxState(element, expectedValue) {

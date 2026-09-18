@@ -26,6 +26,38 @@ test('legacy profiles gain unset fields without losing their context', () => {
   assert.equal(profile.applicantNotes, 'Personal notes');
 });
 
+test('explicit current location uses full profile location and rejects other cities', async () => {
+  saveProfile({ location: 'London, Ontario, Canada' });
+  respond([{ fieldId: 'residence', value: 'London, UK' }]);
+  const { answers } = await generateAutofillAnswers([{ fieldId: 'residence', label: 'Current location', type: 'combobox', options: [{ value: 'uk', label: 'London, UK' }] }]);
+  assert.equal(answers[0].value, '');
+  assert.equal(answers[0].searchQuery, 'London, Ontario, Canada');
+});
+
+test('location grounding chooses one complete match and leaves employer location to context', async () => {
+  saveProfile({ location: 'London, Ontario, Canada' });
+  respond([{ fieldId: 'employer', value: 'Ottawa' }]);
+  const { answers } = await generateAutofillAnswers([
+    { fieldId: 'residence', label: 'Current location', type: 'combobox', options: [{ value: 'ca', label: 'London, Ontario, Canada' }, { value: 'uk', label: 'London, UK' }] },
+    { fieldId: 'employer', label: 'Employer location', type: 'text' },
+  ]);
+  assert.equal(answers.find(a => a.fieldId === 'residence')?.value, 'London, Ontario, Canada');
+  assert.equal(answers.find(a => a.fieldId === 'employer')?.value, 'Ottawa');
+});
+
+test('location grounding leaves duplicate matches and exhausted searches unresolved', async () => {
+  saveProfile({ location: 'London, Ontario, Canada' });
+  respond([{ fieldId: 'residence', value: 'London, UK' }]);
+  const field = { fieldId: 'residence', label: 'Current location', type: 'combobox' };
+  const duplicate = { value: 'ca', label: 'London, Ontario, Canada' };
+  const first = await generateAutofillAnswers([{ ...field, options: [duplicate, { ...duplicate, value: 'ca2' }] }]);
+  assert.equal(first.answers[0].value, '');
+  assert.equal(first.answers[0].searchQuery, undefined);
+  const final = await generateAutofillAnswers([{ ...field, options: [{ value: 'uk', label: 'London, UK' }] }], { allowSearch: false });
+  assert.equal(final.answers[0].value, '');
+  assert.equal(final.answers[0].searchQuery, undefined);
+});
+
 test('primary and repair requests carry explicit country-scoped answers', async () => {
   saveProfile({ workCountry: 'Canada', workAuthorization: 'Yes', sponsorshipNow: 'No', sponsorshipFuture: 'Yes', gender: 'Woman', expectedSalary: '95000', salaryCurrency: 'CAD', applicantNotes: 'Older conflicting notes' });
   await generateAutofillAnswers([], { repairErrors: [{ message: 'Required answer' }] });

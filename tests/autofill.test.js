@@ -124,6 +124,124 @@ test('verification recognizes committed multi chips', async () => {
   assert.equal((await verifyCombobox(field.input, 'Canadian')).verified, true);
 });
 
+test('location search waits for relevant results instead of stale suggestions', async () => {
+  const field = combo('location', ['London, UK']);
+  field.open();
+  const input = field.input.cloneNode(true);
+  field.input.replaceWith(input);
+  setComboboxSearch(input, 'London Ontario');
+  const menu = document.querySelector('#location-menu');
+  const timer = setTimeout(() => { menu.innerHTML = '<div role="option">London, Ontario, Canada</div>'; }, 600);
+  try {
+    const options = await waitForComboboxOptions(input, 1500);
+    assert.deepEqual(options.map(el => el.textContent), ['London, Ontario, Canada']);
+  } finally { clearTimeout(timer); }
+});
+
+test('location search supports results arriving after the old three second deadline', async () => {
+  const field = combo('location', ['Toronto, Ontario, Canada'], { delay: 3300 });
+  field.open();
+  setComboboxSearch(field.input, 'Toronto');
+  assert.equal((await waitForComboboxOptions(field.input))[0]?.textContent, 'Toronto, Ontario, Canada');
+  closeCombobox(field.input);
+});
+
+test('superseded location waits cannot return a newer query result', async () => {
+  const field = combo('location', ['Toronto', 'Ottawa'], { delay: 200 });
+  field.open();
+  setComboboxSearch(field.input, 'Toronto');
+  const waiting = waitForComboboxOptions(field.input, 900);
+  setComboboxSearch(field.input, 'Ottawa');
+  assert.deepEqual(await waiting, []);
+  closeCombobox(field.input);
+});
+
+test('detached autocomplete input cannot report options as usable', async () => {
+  const field = combo('location', ['Toronto']);
+  field.open();
+  field.input.remove();
+  assert.deepEqual(await waitForComboboxOptions(field.input, 300), []);
+});
+
+test('autocomplete attributes are recognized without role; plain location stays text', () => {
+  const field = combo('location', ['Toronto']);
+  field.input.removeAttribute('role');
+  field.input.setAttribute('aria-autocomplete', 'list');
+  document.querySelector('main').insertAdjacentHTML('beforeend', '<label for="plain">Location</label><input id="plain" style="opacity:1">');
+  const fields = scanFormFields();
+  assert.equal(fields.find(f => f.id === 'location')?.type, 'combobox');
+  assert.equal(fields.find(f => f.id === 'plain')?.type, 'text');
+});
+
+function customCommit(field, onSelect) {
+  field.input.addEventListener('mouseup', () => {
+    document.querySelector(`#${field.input.id}-menu [role=option]`).onclick = onSelect;
+  });
+}
+
+test('location fill waits for slow commitment', async () => {
+  const field = combo('location', ['Toronto']);
+  let timer;
+  customCommit(field, () => { timer = setTimeout(() => field.input.setAttribute('aria-valuetext', 'Toronto'), 1400); });
+  try { assert.equal(await fillCombobox(field.input, 'Toronto'), true); }
+  finally { clearTimeout(timer); }
+});
+
+test('location fill rejects selection lost after blur', async () => {
+  const field = combo('location', ['Toronto']);
+  field.input.addEventListener('blur', () => field.shell.querySelectorAll('.select__single-value').forEach(el => el.remove()));
+  assert.equal(await fillCombobox(field.input, 'Toronto'), false);
+});
+
+test('location fill preserves committed input text instead of clearing it', async () => {
+  const field = combo('location', ['Toronto']);
+  customCommit(field, () => {
+    field.input.value = 'Toronto';
+    field.input.setAttribute('aria-valuetext', 'Toronto');
+  });
+  field.input.addEventListener('input', () => field.input.removeAttribute('aria-valuetext'));
+  assert.equal(await fillCombobox(field.input, 'Toronto'), true);
+  assert.equal(field.input.value, 'Toronto');
+  assert.equal((await verifyCombobox(field.input, 'Toronto')).verified, true);
+});
+
+test('search harvesting does not erase a newer user query during cleanup', async () => {
+  const field = combo('location', ['Toronto', 'Ottawa'], { delay: 700 });
+  const fields = scanFormFields();
+  const timer = setTimeout(() => { setComboboxSearch(field.input, 'Ottawa'); }, 200);
+  try {
+    await harvestComboboxOptions(fields, new Map([['location', 'Toronto']]));
+    assert.equal(field.input.value, 'Ottawa');
+    assert.deepEqual(fields[0].options, []);
+  } finally { clearTimeout(timer); closeCombobox(field.input); }
+});
+
+test('already selected location still checks persistence after blur', async () => {
+  const field = combo('location', ['Toronto'], { selected: 'Toronto' });
+  field.input.focus();
+  field.input.addEventListener('blur', () => field.shell.querySelectorAll('.select__single-value').forEach(el => el.remove()));
+  assert.equal(await fillCombobox(field.input, 'Toronto'), false);
+});
+
+test('superseded location fill does not blur newer search with an existing chip', async () => {
+  const field = combo('location', ['Toronto', 'Ottawa', 'Montreal'], { selected: 'Toronto', delay: 700 });
+  let blurs = 0;
+  field.input.addEventListener('blur', () => blurs++);
+  const timer = setTimeout(() => setComboboxSearch(field.input, 'Montreal'), 150);
+  try {
+    assert.equal(await fillCombobox(field.input, 'Ottawa'), false);
+    assert.equal(field.input.value, 'Montreal');
+    assert.equal(blurs, 0);
+    assert.equal(document.activeElement, field.input);
+  } finally { clearTimeout(timer); closeCombobox(field.input); }
+});
+
+test('duplicate full locations stay unresolved and final search cannot loop', async () => {
+  const field = combo('location', ['London, Ontario, Canada', 'London, Ontario, Canada']);
+  assert.equal(await fillCombobox(field.input, 'London, Ontario, Canada'), false);
+  assert.deepEqual(field.clicked, []);
+});
+
 test('AI answers outside the owning combobox options are rejected at the response boundary', async () => {
   saveApiKey('fixture-key');
   globalThis.GM_xmlhttpRequest = options => options.onload({ status: 200, responseText: JSON.stringify({ choices: [{ message: { content: JSON.stringify({ answers: [{ fieldId: 'race', value: 'Canada+1' }] }) } }] }) });

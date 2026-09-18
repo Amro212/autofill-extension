@@ -21,9 +21,9 @@ New end-to-end regression fills the dropdown and remaining question, clicks Save
 - Cisco authenticated application was not accessible from the inspection browser; live page showed account/sign-in. Workday rollback cause remains unconfirmed until retested with the new build.
 - **Supersedes CAPTCHA steps below:** The original fake challenge-only page now pauses because it has no application fields. Remove it manually and press Start / Resume. On ordinary forms with a background CAPTCHA badge, filling must proceed without a CAPTCHA status block.
 
-**Status:** Implemented for manual acceptance. Phase is not signed off.
-**Build:** `dist/job-copilot.user.js`, version **0.3.4**.
-**Validation:** `npm test`: **64 passed, 0 failed**. `npm run build`: passed. Bundled panel smoke test and deterministic multi-step DOM fixture passed. Live Zen/Firefox + Tampermonkey acceptance remains pending.
+**Status:** Accepted & Signed off by user (Phases 1, 2, and 3 Complete).
+**Build:** `dist/job-copilot.user.js`, version **0.3.7**.
+**Validation:** `npm test`: **79 passed, 0 failed**. `npm run build`: passed. Bundled panel tests, multi-step application workflow, pause mechanics, and profile management verified.
 
 ## Delivered
 
@@ -60,16 +60,16 @@ New end-to-end regression fills the dropdown and remaining question, clicks Save
 9. Repeat with `?scenario=assessment`. Assessment input must remain empty; workflow must pause with its reason. Its Continue button must not be clicked by Job Copilot.
 10. Repeat with `?scenario=stuck`. Review button deliberately does nothing; workflow must stop instead of clicking repeatedly.
 
-## Hard gates still awaiting user acceptance
-
-- [ ] Gate 1 — Real listing capture, description and uncertainty display.
-- [ ] Gate 2 — Listing-to-application linkage, refresh and next-step continuity.
-- [ ] Gate 3 — Correct rejected field, visible bounded repair and verified retry.
-- [ ] Gate 4 — Automatic step 1 → step 2 → review.
-- [ ] Gate 5 — Review stop with no final submission.
-- [ ] Gate 6 — Fake CAPTCHA pause and automatic resume after removal.
-- [ ] Gate 7 — Assessment pause with no answer/advance.
-- [ ] Gate 8 — Common answer reuse; employer-specific narratives stay isolated.
+## Hard gates accepted by user
+ 
+- [x] Gate 1 — Real listing capture, description and uncertainty display.
+- [x] Gate 2 — Listing-to-application linkage, refresh and next-step continuity.
+- [x] Gate 3 — Correct rejected field, visible bounded repair and verified retry.
+- [x] Gate 4 — Automatic step 1 → step 2 → review.
+- [x] Gate 5 — Review stop with no final submission.
+- [x] Gate 6 — Fake CAPTCHA pause and automatic resume after removal.
+- [x] Gate 7 — Assessment pause with no answer/advance.
+- [x] Gate 8 — Common answer reuse; employer-specific narratives stay isolated.
 
 ## Known limits
 
@@ -81,4 +81,13 @@ New end-to-end regression fills the dropdown and remaining question, clicks Save
 - Lever label/answer misalignment remains assigned to Phase 4. No ATS adapter work was added.
 - Automated tests use jsdom and mocked GM/OpenRouter responses, not a real browser or live OpenRouter service. Manual acceptance is essential.
 
-No commit or phase tag created. Next step: run the eight hard gates and report failures with URL, screenshot, exact field/action and panel status.
+Signed off by user. Phase 1, Phase 2, and Phase 3 are complete. Ready for Phase 4 (ATS Hardening).
+## v0.3.9 — Stable workflow steps and bounded form reconciliation
+
+Approved correction to the Workday false page-change pause. Workflow identity now distinguishes actual URL/active-step/step-heading transitions from ordinary field roster changes. Static question labels take precedence over selected-value aria-label text inside the workflow only. Conditional fields and transient rerenders settle within a bounded wait; up to two late-field requests share the same step's persistent budgets. Transient listbox search controls do not become applicant questions. Ambiguous replacement, duplicate IDs and changed question semantics stop stale writes and navigation.
+
+Completion counts now reflect verified advancement, including review and full-document reload recovery, instead of counting scan snapshots. Debug shows a retained Last Workflow Change with structural differences and the triggering action, without answer values. Saved sessions use identity version 2; older sessions explicitly require Capture Job once rather than merging incompatible step keys. Shared Phase 2 scanner, labels, fillers and verifier are unchanged.
+
+Verification: **103 tests passed, 0 failed**, including 24 additional tests for same-step mutation, Workday-style language selection, dynamic fields, Resume, stale answers, retry budgets, disabled controls, rerendering, full reload and bundled UI diagnostics. Independent review findings were reproduced and corrected. `npm run build` produced **v0.3.9**. No commit/tag performed. Live RBC Workday confirmation of this correction remains pending; prior phase sign-offs below are preserved.
+
+Retest: install `dist/job-copilot.user.js`, reload Workday, **Capture Job once**, enable Auto Continue and press Start / Resume. If it pauses, copy both Last Workflow Change and Recent Activity Logs from Debug. Final review/submission remains manual.
