@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { scanFormFields, harvestComboboxOptions } from '../src/fields/scanner.js';
 import { openCombobox, closeCombobox, setComboboxSearch, waitForComboboxOptions } from '../src/fields/combobox.js';
-import { fillCombobox } from '../src/fields/fillers.js';
+import { fillCombobox, fillField } from '../src/fields/fillers.js';
 import { verifyCombobox } from '../src/fields/verify.js';
 import { normalizeFieldsForAI } from '../src/fields/normalize.js';
 import { generateAutofillAnswers, rewriteNarrativeField } from '../src/ai.js';
-import { saveApiKey } from '../src/storage.js';
+import { saveApiKey, saveProfile } from '../src/storage.js';
 
 beforeEach(() => {
   const dom = new JSDOM('<body><main class="application-container"></main></body>', { url: 'https://example.com/jobs' });
@@ -15,6 +15,7 @@ beforeEach(() => {
   globalThis.CSS = { escape: value => value };
   Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { get: () => 200 });
   globalThis.GM_xmlhttpRequest = undefined;
+  saveProfile({});
 });
 
 function combo(id, labels, { selected = '', multi = false, delay = 0, portal = true, openEvent = 'mousedown' } = {}) {
@@ -122,6 +123,85 @@ test('verification rejects a different selected option with the same prefix', as
 test('verification recognizes committed multi chips', async () => {
   const field = combo('nationality', ['Canadian'], { selected: 'Canadian', multi: true });
   assert.equal((await verifyCombobox(field.input, 'Canadian')).verified, true);
+});
+
+function leverLocation({ reject = false } = {}) {
+  document.querySelector('main').innerHTML = `<label><div class="application-label">Current location <span>✱</span></div><div class="application-field"><input id="location-input" class="location-input" name="location" required><input type="hidden" name="selectedLocation"><div class="dropdown-container" style="display:none"><div class="dropdown-results"></div><div style="display:none">No location found. Loading</div></div></div></label>`;
+  const input = document.querySelector('input');
+  const menu = document.querySelector('.dropdown-container');
+  let timer;
+  input.addEventListener('keyup', () => {
+    clearTimeout(timer);
+    menu.style.display = 'block';
+    menu.querySelector('.dropdown-results').replaceChildren();
+    if (!input.value) return;
+    timer = setTimeout(() => {
+      for (const label of ['Toronto, OH, USA', 'Toronto, ON, CAN']) {
+        const option = document.createElement('div');
+        option.className = 'dropdown-location';
+        option.textContent = label;
+        option.onclick = () => { input.value = label; menu.style.display = 'none'; };
+        menu.querySelector('.dropdown-results').append(option);
+      }
+    }, 350);
+  });
+  input.addEventListener('blur', () => { if (reject) input.value = ''; });
+  return input;
+}
+
+test('Lever location is a combobox with a clean residence label', () => {
+  leverLocation();
+  const [field] = scanFormFields();
+  assert.equal(field.type, 'combobox');
+  assert.equal(field.label, 'Current location');
+});
+
+test('Lever delayed location harvest and selection survive blur without hidden backing data', async () => {
+  const input = leverLocation();
+  const fields = scanFormFields();
+  await harvestComboboxOptions(fields, new Map([['location-input', 'Toronto, Ontario, Canada']]));
+  assert.equal(fields[0].options.length, 1);
+  assert.equal(fields[0].options[0].label, 'Toronto, ON, CAN');
+  assert.equal(await fillField(fields[0], 'Toronto, ON, CAN'), true);
+  assert.equal(input.value, 'Toronto, ON, CAN');
+  assert.equal((await verifyCombobox(input, 'Toronto, ON, CAN')).verified, true);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  assert.equal(scanFormFields()[0].currentValue, '', 'editing invalidates the earlier option activation');
+});
+
+test('Lever query text alone is not a selection and blur rejection fails verification', async () => {
+  const input = leverLocation({ reject: true });
+  input.value = 'Toronto, ON, CAN';
+  assert.equal(scanFormFields()[0].currentValue, '');
+  const [field] = scanFormFields();
+  field.options = [{ label: 'Toronto, ON, CAN', value: 'Toronto, ON, CAN' }];
+  assert.equal(await fillField(field, 'Toronto, ON, CAN'), false);
+});
+
+test('ARIA residence autocomplete searches profile city before AI and preserves region disambiguation', async () => {
+  saveProfile({ location: 'Toronto, Ontario, Canada' });
+  const widget = combo('residence', ['Toronto, OH, USA', 'Toronto, ON, CAN'], { delay: 350 });
+  widget.shell.querySelector('label').textContent = 'Current location';
+  const fields = scanFormFields();
+  await harvestComboboxOptions(fields);
+  assert.ok(widget.searches.includes('Toronto'));
+  assert.deepEqual(fields[0].options.map(option => option.label), ['Toronto, ON, CAN']);
+  assert.equal(await fillField(fields[0], 'Toronto, ON, CAN'), true);
+  assert.equal((await verifyCombobox(widget.input, 'Toronto, ON, CAN')).verified, true);
+});
+
+test('city-only search waits past stale same-city suggestions from the wrong region', async () => {
+  const widget = combo('residence', ['Toronto, OH, USA']);
+  widget.shell.querySelector('label').textContent = 'Current location';
+  widget.open();
+  setComboboxSearch(widget.input, 'Toronto');
+  const timer = setTimeout(() => {
+    document.querySelector('#residence-menu [role=option]').textContent = 'Toronto, ON, CAN';
+  }, 500);
+  try {
+    const options = await waitForComboboxOptions(widget.input, 1500, 'Toronto, Ontario, Canada');
+    assert.deepEqual(options.map(option => option.textContent), ['Toronto, ON, CAN']);
+  } finally { clearTimeout(timer); closeCombobox(widget.input); }
 });
 
 test('location search waits for relevant results instead of stale suggestions', async () => {

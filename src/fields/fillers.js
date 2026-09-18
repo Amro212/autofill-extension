@@ -1,6 +1,8 @@
 import { FIELD_TYPES } from '../constants.js';
-import { extractOptionLabel } from './labels.js';
+import { extractOptionLabel, extractLabel } from './labels.js';
+import { isResidenceLabel } from '../location.js';
 import { logger } from '../debug.js';
+import { isLeverLocation, recordLocationActivation } from './combobox.js';
 import { optionKey, findExactOption, optionData, resolveComboboxParts, readComboboxSelection, discoverComboboxOptions, openCombobox, closeCombobox, setComboboxSearch, waitForComboboxOptions, waitForComboboxSelection, clickFieldControl } from './combobox.js';
 
 function setNativeInputValue(element, value) {
@@ -252,8 +254,9 @@ export async function fillCombobox(element, targetValue, knownOptions) {
       return await waitForComboboxSelection(element, target);
     }
     await openCombobox(element);
-    ownsSearch = setComboboxSearch(input, '');
-    let options = await waitForComboboxOptions(element);
+    const location = isLeverLocation(element) || known && isResidenceLabel(extractLabel(element));
+    ownsSearch = setComboboxSearch(input, location ? target.split(',')[0].trim() : '');
+    let options = await waitForComboboxOptions(element, undefined, location ? target : undefined);
     if (!ownsSearch()) return false;
     let match = findExactOption(options.map(option => ({ ...optionData(option), element: option })), target);
     // Search only for an option already harvested from this field (async/virtual menus).
@@ -274,6 +277,7 @@ export async function fillCombobox(element, targetValue, knownOptions) {
     match.element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
     match.element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0 }));
     clickFieldControl(match.element);
+    recordLocationActivation(element, match.label);
     if (!await waitForComboboxSelection(element, target)) return false;
     closeCombobox(element);
     // The site's blur handler can reject or clear an apparent selection.

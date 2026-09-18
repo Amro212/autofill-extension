@@ -1,3 +1,5 @@
+import { isResidenceLabel, locationMatches } from './location.js';
+
 const yesNo = ['Yes', 'No'];
 const disclosure = ['Yes', 'No', 'Prefer not to answer'];
 
@@ -63,9 +65,9 @@ function matchesDemographicOption(key, value, label) {
 export function fixedProfileAnswer(field, profile, { allowSearch = true } = {}) {
   const label = normalize(field.label);
   // Only explicit residence questions: bare "Location" can refer to an employer.
-  if (field.type === 'combobox' && /^(?:current location|your current location|where are you (?:currently )?(?:located|based)|location of residence)$/.test(label) && profile.location?.trim()) {
+  if (field.type === 'combobox' && isResidenceLabel(field.label) && profile.location?.trim()) {
     const location = profile.location.trim();
-    const matches = (field.options || []).filter(option => normalize(option.label) === normalize(location));
+    const matches = (field.options || []).filter(option => locationMatches(option.label, location));
     return { fieldId: field.fieldId, value: matches.length === 1 ? matches[0].label : '', inferred: false,
       ...(!matches.length && allowSearch ? { searchQuery: location } : {}) };
   }

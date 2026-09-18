@@ -1,3 +1,6 @@
+import { extractLabel } from './labels.js';
+import { isResidenceLabel, locationMatches } from '../location.js';
+
 // Shared ownership and committed-state rules for scanning, harvesting and filling.
 export const COMBO = '[role="combobox"], button[aria-haspopup="listbox"], input[aria-autocomplete="list"], input[aria-autocomplete="both"]';
 const MENU = '[role="listbox"], .select__menu, [class*="menu-list"]';
@@ -5,6 +8,20 @@ const OPTION = '[role="option"], .select__option';
 const VALUE = '.select__single-value, [class*="singleValue"], [class*="single-value"], .select__multi-value__label, [class*="multiValueLabel"], [class*="multi-value__label"]';
 const countryLabelsByInput = new WeakMap();
 const searchesByInput = new WeakMap();
+const activatedLocations = new WeakMap();
+
+export function isLeverLocation(element) {
+  return element.matches('input.location-input[name="location"]') &&
+    Boolean(element.parentElement?.querySelector('input[type="hidden"][name="selectedLocation"]')) &&
+    Boolean(element.parentElement?.querySelector('.dropdown-container .dropdown-results'));
+}
+
+export function recordLocationActivation(element, label) {
+  if (isLeverLocation(element)) {
+    activatedLocations.set(element, label);
+    element.addEventListener('input', () => activatedLocations.delete(element), { once: true });
+  }
+}
 
 function countryDisplayKey(node) {
   const flag = node.querySelector('.iti__flag');
@@ -17,6 +34,7 @@ export const optionKey = value => String(value ?? '').normalize('NFKC').replace(
 export const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export function resolveComboboxParts(element) {
+  if (isLeverLocation(element)) return { container: element.parentElement, input: element, controlBox: element, toggleBtn: null };
   let container = element;
   // Walk past an input carrying role=combobox, but never cross into another field.
   for (let parent = element.parentElement; parent && !parent.matches('body, html, form, main'); parent = parent.parentElement) {
@@ -33,6 +51,7 @@ export function resolveComboboxParts(element) {
 }
 
 export function getComboboxMenus(element) {
+  if (isLeverLocation(element)) return Array.from(element.parentElement.querySelectorAll('.dropdown-container'));
   const { container, input } = resolveComboboxParts(element);
   const ids = new Set([element, input].filter(Boolean).flatMap(node =>
     `${node.getAttribute('aria-controls') || ''} ${node.getAttribute('aria-owns') || ''}`.trim().split(/\s+/).filter(Boolean)));
@@ -45,7 +64,7 @@ export function getComboboxMenus(element) {
 export function discoverComboboxOptions(element) {
   const options = [...new Set(getComboboxMenus(element).flatMap(menu => {
     if (menu.hidden || menu.getAttribute('aria-hidden') === 'true' || menu.style.display === 'none') return [];
-    return Array.from(menu.querySelectorAll(OPTION)).filter(option =>
+    return Array.from(menu.querySelectorAll(isLeverLocation(element) ? '.dropdown-results > .dropdown-location' : OPTION)).filter(option =>
       option.textContent?.trim() && !option.hidden && option.style.display !== 'none' &&
       option.ownerDocument.defaultView.getComputedStyle(option).visibility !== 'hidden' &&
       !option.hasAttribute('disabled') && option.getAttribute('aria-disabled') !== 'true');
@@ -74,6 +93,13 @@ export function findExactOption(options, target) {
 
 export function readComboboxSelection(element) {
   if (!element?.isConnected) return [];
+  if (isLeverLocation(element)) {
+    // Lever can leave selectedLocation empty even after a real option click.
+    // Require an observed activation plus exact persisted display and closed menu.
+    const activated = activatedLocations.get(element);
+    return activated && element.value === activated && getComboboxMenus(element).every(menu =>
+      menu.hidden || menu.style.display === 'none' || element.ownerDocument.defaultView.getComputedStyle(menu).display === 'none') ? [activated] : [];
+  }
   const { container, input } = resolveComboboxParts(element);
   const labels = countryLabelsByInput.get(input || element);
   // Greenhouse renders the selected phone country as a flag plus dial code only.
@@ -100,6 +126,7 @@ export function setComboboxSearch(input, value) {
   searchesByInput.set(input, search);
   const ownsSearch = () => input.isConnected && searchesByInput.get(input) === search && input.value === value;
   if (input.value === value) return ownsSearch;
+  activatedLocations.delete(input);
   const setter = Object.getOwnPropertyDescriptor(input.ownerDocument.defaultView.HTMLInputElement.prototype, 'value')?.set;
   if (setter) setter.call(input, value);
   else input.value = value;
@@ -138,7 +165,7 @@ export async function openCombobox(element) {
   if (!getComboboxMenus(element).length && toggleBtn) clickFieldControl(toggleBtn);
 }
 
-export async function waitForComboboxOptions(element, timeoutMs) {
+export async function waitForComboboxOptions(element, timeoutMs, locationQuery) {
   const { input } = resolveComboboxParts(element);
   const search = input && searchesByInput.get(input);
   const query = input?.value || '';
@@ -148,12 +175,20 @@ export async function waitForComboboxOptions(element, timeoutMs) {
   do {
     if (!element.isConnected || input && (!input.isConnected || input.value !== query || searchesByInput.get(input) !== search)) return [];
     const menus = getComboboxMenus(element);
-    const loading = element.getAttribute('aria-busy') === 'true' || menus.some(menu => menu.getAttribute('aria-busy') === 'true' || /\bloading\b/i.test(menu.textContent));
+    const loading = element.getAttribute('aria-busy') === 'true' || menus.some(menu => {
+      if (menu.getAttribute('aria-busy') === 'true') return true;
+      if (isLeverLocation(element)) {
+        const indicator = menu.querySelector('.dropdown-loading-results');
+        return indicator && !indicator.hidden && indicator.ownerDocument.defaultView.getComputedStyle(indicator).display !== 'none';
+      }
+      return /\bloading\b/i.test(menu.textContent);
+    });
     // A pre-existing list may belong to a previous request. Require relevance
     // to every query term; never accept the first nonempty list blindly.
+    const location = isLeverLocation(element) || isResidenceLabel(extractLabel(element));
     const options = discoverComboboxOptions(element).filter(option => {
       const text = optionKey(option.textContent);
-      return words.every(word => text.includes(word));
+      return location && query ? locationMatches(text, locationQuery || query) : words.every(word => text.includes(word));
     });
     const signature = JSON.stringify(options.map(optionData));
     if (loading || signature !== previous) { stableSince = Date.now(); previous = signature; }

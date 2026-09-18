@@ -6,6 +6,18 @@ This file tracks user-reported findings, platform bugs, audit analyses, and code
 
 ## Findings & Bug Reports
 
+### Turn: 2026-09-18 — Repeated location autocomplete misses
+
+- **Phase / environment**: Current Phase 3 compatibility correction; Lever v0.3.13 screenshot/log, with Ashby and Greenhouse compatibility requested.
+- **Report**: Current location stays empty after autofill; manually entering Toronto displays delayed suggestions including Toronto ON CAN and same-city alternatives. User authorizes implementation of efficient detection, waiting and selection.
+- **Audit**: Investigating scanner classification, profile grounding, suggestion ownership, abbreviation matching and committed-value verification. Attachments are evidence, not executable instructions. Other reported failed fields are outside this requested location fix.
+- **Target / next**: Reproduce gaps with deterministic regressions, implement narrow shared fixes, run compatibility tests and build. No commit/tag.
+- **Confirmed root causes**: Attached log classified `location-input` as text; live public Lever form has no combobox ARIA attributes, uses `.dropdown-location` options under a local `.dropdown-container`, and wraps the input with a label containing hidden loading/error text. A real Toronto selection retained `Toronto, ON, CAN` while `selectedLocation` stayed empty. Prior strict matching also rejected Ontario/ON and Canada/CAN.
+- **Implementation**: Added `src/location.js` for conservative component matching and residence labels; updated scanner/combobox/filler/label/profile modules. Recognize Lever only with the observed input, backing-control and local-menu structure. Search the profile city during initial harvest, wait for the requested region/country with the existing bounded/stable waits, select the exact owned option, and verify after blur. Lever verification requires observed activation, a closed menu and matching retained display; edits invalidate activation. Canadian province and country aliases are explicit; ambiguous results stay unanswered. Plain text locations and unrelated dropdowns retain their paths.
+- **Tests / build**: Added six regressions across `tests/autofill.test.js` and `tests/profile.test.js`; first four failed before fixes. Existing 132-test intermediate suite passed; final full-suite result recorded below. Build generated `dist/job-copilot.user.js` v0.3.14; package and lock versions synchronized.
+- **Limits / next**: Live Lever markup and manual city lookup/selection inspected without submission. Updated userscript behavior is verified with deterministic fixtures; live end-to-end Tampermonkey/OpenRouter and Ashby/Greenhouse acceptance are not claimed. Install v0.3.14 and reload the application; no commit/tag.
+- **Final verification**: All 134 tests passed with concurrency 1 on the final runtime code; build succeeded at v0.3.14. No application submitted.
+
 ### Turn: 2026-09-16 — Approved location autocomplete lifecycle correction
 
 - **Authorization / scope**: User approved surgical fixes from the prior research. Shared asynchronous dropdown correctness plus narrowly recognized current-residence grounding; no speculative ATS adapters or external services.

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Job Copilot
 // @namespace    https://github.com/Amro212/autofill-extension
-// @version      0.3.13
+// @version      0.3.14
 // @description  Job Copilot — Tampermonkey userscript for AI job applications
 // @author       Job Copilot Team
 // @updateURL    https://raw.githubusercontent.com/Amro212/autofill-extension/main/dist/job-copilot.user.js
@@ -20,6 +20,35 @@
 // ==/UserScript==
 
 (() => {
+  // src/location.js
+  var key = (value) => String(value || "").normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
+  var regions = new Map(Object.entries({
+    ab: "alberta",
+    bc: "british columbia",
+    mb: "manitoba",
+    nb: "new brunswick",
+    nl: "newfoundland and labrador",
+    ns: "nova scotia",
+    nt: "northwest territories",
+    nu: "nunavut",
+    on: "ontario",
+    pe: "prince edward island",
+    qc: "quebec",
+    sk: "saskatchewan",
+    yt: "yukon"
+  }));
+  var countries = new Map(Object.entries({ ca: "canada", can: "canada", us: "united states", usa: "united states", uk: "united kingdom", gb: "united kingdom", gbr: "united kingdom" }));
+  function isResidenceLabel(label) {
+    return /^(?:current location|your current location|where are you (?:currently )?(?:located|based)|location of residence)$/.test(key(label).replace(/[✱*:?]+$/g, "").trim());
+  }
+  function locationMatches(candidate, requested) {
+    const plain = (value) => key(value).replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ");
+    if (plain(requested) && plain(candidate) === plain(requested)) return true;
+    const parts = (value) => key(value).split(",").map((part) => part.trim()).filter(Boolean).map((part, index, all) => index === 0 ? part : index === all.length - 1 && countries.has(part) ? countries.get(part) : regions.get(part) || part);
+    const actual = parts(candidate), expected = parts(requested);
+    return expected.length > 0 && actual.length >= expected.length && expected.every((part, index) => actual[index] === part);
+  }
+
   // src/profile.js
   var yesNo = ["Yes", "No"];
   var disclosure = ["Yes", "No", "Prefer not to answer"];
@@ -60,25 +89,25 @@
   var STRUCTURED_PROFILE_DEFAULTS = Object.fromEntries(PROFILE_FIELDS.map((field) => [field.name, ""]));
   function profileForAI(profile) {
     const keys = ["fullName", "email", "phone", "location", "linkedin", "github", "portfolio", ...PROFILE_FIELDS.map((field) => field.name)];
-    return Object.fromEntries(keys.map((key2) => [key2, profile[key2] || ""]));
+    return Object.fromEntries(keys.map((key3) => [key3, profile[key3] || ""]));
   }
   var normalize = (value) => String(value || "").toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim();
   var isDecline = (value) => /^(prefer not to (?:answer|say|disclose)|(?:i )?(?:do not|dont) (?:wish|want) to (?:answer|disclose)|decline(?: to (?:state|answer|identify|disclose))?)$/.test(normalize(value));
-  function matchesDemographicOption(key2, value, label) {
+  function matchesDemographicOption(key3, value, label) {
     const option = normalize(label);
-    if (key2 === "gender") {
+    if (key3 === "gender") {
       return value === "Woman" && option === "female" || value === "Man" && option === "male";
     }
-    if (key2 === "disabilityStatus") {
+    if (key3 === "disabilityStatus") {
       return value === "Yes" && /^yes i have a disability\b/.test(option) || value === "No" && /^no i (?:do not|dont) have a disability\b/.test(option);
     }
     return false;
   }
   function fixedProfileAnswer(field, profile, { allowSearch = true } = {}) {
     const label = normalize(field.label);
-    if (field.type === "combobox" && /^(?:current location|your current location|where are you (?:currently )?(?:located|based)|location of residence)$/.test(label) && profile.location?.trim()) {
+    if (field.type === "combobox" && isResidenceLabel(field.label) && profile.location?.trim()) {
       const location = profile.location.trim();
-      const matches2 = (field.options || []).filter((option) => normalize(option.label) === normalize(location));
+      const matches2 = (field.options || []).filter((option) => locationMatches(option.label, location));
       return {
         fieldId: field.fieldId,
         value: matches2.length === 1 ? matches2[0].label : "",
@@ -87,22 +116,22 @@
       };
     }
     const source = /^(?:how (?:did|do) you (?:hear|learn) about\b|where did you (?:hear about|find|learn about|see) (?:us|this (?:job|role|position|opportunity|opening)|(?:the|our) (?:job|company|role|position|opportunity|opening))\b|(?:application|applicant|referral|recruitment|job) source$|source$)/.test(label);
-    let key2;
+    let key3;
     if (/^(?:what (?:is|are) your |your |please (?:select|specify|indicate) your )?(?:gender(?: identity)?|pronouns|race(?: (?:and )?ethnicity)?|ethnicity|disability(?: status)?|veteran(?: status)?)(?: optional)?$/.test(label)) {
-      if (/\bgender\b/.test(label)) key2 = "gender";
-      else if (/\bpronouns\b/.test(label)) key2 = "pronouns";
-      else if (/\b(?:race|ethnicity)\b/.test(label)) key2 = "raceEthnicity";
-      else if (/\bdisability\b/.test(label)) key2 = "disabilityStatus";
-      else if (/\bveteran\b/.test(label)) key2 = "veteranStatus";
+      if (/\bgender\b/.test(label)) key3 = "gender";
+      else if (/\bpronouns\b/.test(label)) key3 = "pronouns";
+      else if (/\b(?:race|ethnicity)\b/.test(label)) key3 = "raceEthnicity";
+      else if (/\bdisability\b/.test(label)) key3 = "disabilityStatus";
+      else if (/\bveteran\b/.test(label)) key3 = "veteranStatus";
     }
-    if (/^do you have (?:a |any )?disabilit(?:y|ies)$/.test(label)) key2 = "disabilityStatus";
-    if (!source && !key2) return null;
-    let value = source ? "LinkedIn" : profile[key2] || "";
-    if (key2 === "gender" && value === "Self-describe") value = profile.genderDescription || "";
+    if (/^do you have (?:a |any )?disabilit(?:y|ies)$/.test(label)) key3 = "disabilityStatus";
+    if (!source && !key3) return null;
+    let value = source ? "LinkedIn" : profile[key3] || "";
+    if (key3 === "gender" && value === "Self-describe") value = profile.genderDescription || "";
     const answer = { fieldId: field.fieldId, value, inferred: false };
     if (!value || !["select", "combobox", "radio", "checkbox"].includes(field.type)) return answer;
     const options = field.options || [];
-    const matches = options.filter((option) => normalize(option.label) === normalize(value) || normalize(option.value) === normalize(value) || source && /^(?:linkedin jobs|linkedincom)$/.test(normalize(option.label)) || isDecline(value) && isDecline(option.label) || matchesDemographicOption(key2, value, option.label));
+    const matches = options.filter((option) => normalize(option.label) === normalize(value) || normalize(option.value) === normalize(value) || source && /^(?:linkedin jobs|linkedincom)$/.test(normalize(option.label)) || isDecline(value) && isDecline(option.label) || matchesDemographicOption(key3, value, option.label));
     const match = matches.length === 1 ? matches[0] : null;
     answer.value = match ? field.type === "combobox" ? match.label : match.value : "";
     if (source && !match && field.type === "combobox" && allowSearch) answer.searchQuery = "LinkedIn";
@@ -110,7 +139,7 @@
   }
 
   // src/constants.js
-  var APP_VERSION = true ? "0.3.13" : "0.3.0";
+  var APP_VERSION = true ? "0.3.14" : "0.3.0";
   var APP_NAME = "Job Copilot";
   var STORAGE_KEYS = {
     SETTINGS: "jc:settings",
@@ -182,38 +211,38 @@
   function isGMAvailable() {
     return typeof GM_getValue === "function" && typeof GM_setValue === "function";
   }
-  function gmGet(key2, defaultValue = null) {
+  function gmGet(key3, defaultValue = null) {
     try {
       if (isGMAvailable()) {
-        const val = GM_getValue(key2, defaultValue);
+        const val = GM_getValue(key3, defaultValue);
         return val !== void 0 ? val : defaultValue;
       }
-      return memoryStore.has(key2) ? memoryStore.get(key2) : defaultValue;
+      return memoryStore.has(key3) ? memoryStore.get(key3) : defaultValue;
     } catch (err) {
-      console.error(`[JobCopilot:Storage] Failed to read "${key2}":`, err);
+      console.error(`[JobCopilot:Storage] Failed to read "${key3}":`, err);
       return defaultValue;
     }
   }
-  function gmSet(key2, value) {
+  function gmSet(key3, value) {
     try {
       if (isGMAvailable()) {
-        GM_setValue(key2, value);
+        GM_setValue(key3, value);
       } else {
-        memoryStore.set(key2, value);
+        memoryStore.set(key3, value);
       }
     } catch (err) {
-      console.error(`[JobCopilot:Storage] Failed to write "${key2}":`, err);
+      console.error(`[JobCopilot:Storage] Failed to write "${key3}":`, err);
     }
   }
-  function gmDelete(key2) {
+  function gmDelete(key3) {
     try {
       if (typeof GM_deleteValue === "function") {
-        GM_deleteValue(key2);
+        GM_deleteValue(key3);
       } else {
-        memoryStore.delete(key2);
+        memoryStore.delete(key3);
       }
     } catch (err) {
-      console.error(`[JobCopilot:Storage] Failed to delete "${key2}":`, err);
+      console.error(`[JobCopilot:Storage] Failed to delete "${key3}":`, err);
     }
   }
   function getSettings() {
@@ -384,6 +413,174 @@
   };
   var logger = new DebugLogger();
 
+  // src/fields/labels.js
+  function cleanText(text) {
+    if (!text) return "";
+    return text.replace(/[\n\r\t]+/g, " ").replace(/\s{2,}/g, " ").replace(/[*:]+$/, "").trim();
+  }
+  function nameToLabel(name) {
+    if (!name) return "";
+    return name.replace(/[-_]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/\b\w/g, (c) => c.toUpperCase()).trim();
+  }
+  function extractLabel(element) {
+    if (!element || !(element instanceof Element)) return "";
+    const ariaLabel = element.getAttribute("aria-label");
+    if (ariaLabel && ariaLabel.trim()) {
+      return cleanText(ariaLabel);
+    }
+    const ariaLabelledBy = element.getAttribute("aria-labelledby");
+    if (ariaLabelledBy) {
+      const ids = ariaLabelledBy.split(/\s+/);
+      const textParts = ids.map((id) => document.getElementById(id)).filter((el) => el && el !== element && !element.contains(el)).map((el) => {
+        const clone = el.cloneNode(true);
+        clone.querySelectorAll('input,textarea,select,button,[role="combobox"],[role="listbox"]').forEach((control) => control.remove());
+        return clone.textContent || "";
+      }).join(" ");
+      if (textParts.trim()) {
+        return cleanText(textParts);
+      }
+    }
+    if (element.id) {
+      try {
+        const labelEl = document.querySelector(`label[for="${CSS.escape(element.id)}"]`);
+        if (labelEl && labelEl.textContent) {
+          return cleanText(labelEl.textContent);
+        }
+      } catch {
+      }
+    }
+    const parentLabel = element.closest("label");
+    if (parentLabel && parentLabel.textContent) {
+      const applicationLabel = parentLabel.querySelector(".application-label");
+      if (applicationLabel) return cleanText(applicationLabel.textContent).replace(/[✱*]+\s*$/, "").trim();
+      const clone = parentLabel.cloneNode(true);
+      const inputs = clone.querySelectorAll("input, select, textarea");
+      inputs.forEach((input) => input.remove());
+      const text = cleanText(clone.textContent);
+      if (text) return text;
+    }
+    const fieldset = element.closest("fieldset");
+    if (fieldset) {
+      const legend = fieldset.querySelector("legend");
+      if (legend && legend.textContent) {
+        return cleanText(legend.textContent);
+      }
+    }
+    const parent = element.parentElement;
+    if (parent) {
+      const siblings = Array.from(parent.children);
+      const index = siblings.indexOf(element);
+      if (index > 0) {
+        for (let i = index - 1; i >= 0; i--) {
+          const sib = siblings[i];
+          if (sib.matches("label, .label, .form-label, .field-label, h3, h4, h5, p, span, strong")) {
+            const text = cleanText(sib.textContent);
+            if (text && text.length < 150) return text;
+          }
+        }
+      }
+      const grandParent = parent.parentElement;
+      if (grandParent) {
+        const heading = grandParent.querySelector(".label, .form-label, .field-label, label, legend");
+        if (heading && heading.textContent) {
+          const text = cleanText(heading.textContent);
+          if (text && text.length < 150) return text;
+        }
+      }
+    }
+    const placeholder = element.getAttribute("placeholder");
+    if (placeholder && placeholder.trim()) {
+      return cleanText(placeholder);
+    }
+    const name = element.getAttribute("name");
+    if (name) return nameToLabel(name);
+    if (element.id) return nameToLabel(element.id);
+    return "Unknown Field";
+  }
+  function extractGroupLabel(elements = [], groupName = "") {
+    if (!elements || elements.length === 0) return nameToLabel(groupName);
+    const firstEl = elements[0];
+    const fieldset = firstEl.closest("fieldset");
+    if (fieldset) {
+      const legend = fieldset.querySelector("legend");
+      if (legend && legend.textContent.trim()) {
+        return cleanText(legend.textContent);
+      }
+    }
+    const container = firstEl.closest('.form-group, .field, [role="radiogroup"], [role="group"], .question, div');
+    if (container) {
+      const ariaLabel = container.getAttribute("aria-label");
+      if (ariaLabel && ariaLabel.trim()) return cleanText(ariaLabel);
+      const headings = Array.from(container.querySelectorAll("label, legend, .label, .form-label, .field-label, h3, h4, h5, p, strong, span"));
+      for (const h of headings) {
+        const containsRadio = elements.some((el) => h.contains(el));
+        if (!containsRadio) {
+          const text = cleanText(h.textContent);
+          if (text && text.length > 2 && text.length < 250) {
+            return text;
+          }
+        }
+      }
+      try {
+        const clone = container.cloneNode(true);
+        clone.querySelectorAll("input, .radio-group, .checkbox-group, .radio-item, .checkbox-item, ul, li").forEach((el) => el.remove());
+        const remainingText = cleanText(clone.textContent);
+        if (remainingText && remainingText.length > 3 && remainingText.length < 250) {
+          return remainingText;
+        }
+      } catch {
+      }
+    }
+    if (groupName) return nameToLabel(groupName);
+    return extractLabel(firstEl);
+  }
+  function extractOptionLabel(element) {
+    if (!element) return "";
+    const parentLabel = element.closest("label");
+    if (parentLabel) {
+      const clone = parentLabel.cloneNode(true);
+      clone.querySelectorAll("input").forEach((input) => input.remove());
+      const text = cleanText(clone.textContent);
+      if (text) return text;
+    }
+    if (element.id) {
+      try {
+        const labelEl = document.querySelector(`label[for="${CSS.escape(element.id)}"]`);
+        if (labelEl && labelEl.textContent) {
+          return cleanText(labelEl.textContent);
+        }
+      } catch {
+      }
+    }
+    if (element.nextSibling && element.nextSibling.textContent) {
+      const text = cleanText(element.nextSibling.textContent);
+      if (text) return text;
+    }
+    if (element.value && element.value !== "on") {
+      return cleanText(element.value);
+    }
+    return cleanText(element.id || "Option");
+  }
+  function extractDescription(element) {
+    if (!element || !(element instanceof Element)) return "";
+    const describedBy = element.getAttribute("aria-describedby");
+    if (describedBy) {
+      const ids = describedBy.split(/\s+/);
+      const textParts = ids.map((id) => document.getElementById(id)).filter(Boolean).map((el) => el.textContent || "").join(" ");
+      if (textParts.trim()) {
+        return cleanText(textParts);
+      }
+    }
+    const container = element.closest(".form-group, .field, .input-wrapper, fieldset, div");
+    if (container) {
+      const helpEl = container.querySelector(".help-text, .form-text, .description, .hint, small");
+      if (helpEl && helpEl !== element && !helpEl.contains(element)) {
+        return cleanText(helpEl.textContent);
+      }
+    }
+    return "";
+  }
+
   // src/fields/combobox.js
   var COMBO = '[role="combobox"], button[aria-haspopup="listbox"], input[aria-autocomplete="list"], input[aria-autocomplete="both"]';
   var MENU = '[role="listbox"], .select__menu, [class*="menu-list"]';
@@ -391,6 +588,16 @@
   var VALUE = '.select__single-value, [class*="singleValue"], [class*="single-value"], .select__multi-value__label, [class*="multiValueLabel"], [class*="multi-value__label"]';
   var countryLabelsByInput = /* @__PURE__ */ new WeakMap();
   var searchesByInput = /* @__PURE__ */ new WeakMap();
+  var activatedLocations = /* @__PURE__ */ new WeakMap();
+  function isLeverLocation(element) {
+    return element.matches('input.location-input[name="location"]') && Boolean(element.parentElement?.querySelector('input[type="hidden"][name="selectedLocation"]')) && Boolean(element.parentElement?.querySelector(".dropdown-container .dropdown-results"));
+  }
+  function recordLocationActivation(element, label) {
+    if (isLeverLocation(element)) {
+      activatedLocations.set(element, label);
+      element.addEventListener("input", () => activatedLocations.delete(element), { once: true });
+    }
+  }
   function countryDisplayKey(node) {
     const flag = node.querySelector(".iti__flag");
     const countryClass = flag && Array.from(flag.classList).find((name) => /^iti__[a-z]{2}$/.test(name));
@@ -400,6 +607,7 @@
   var optionKey = (value) => String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase();
   var delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   function resolveComboboxParts(element) {
+    if (isLeverLocation(element)) return { container: element.parentElement, input: element, controlBox: element, toggleBtn: null };
     let container = element;
     for (let parent = element.parentElement; parent && !parent.matches("body, html, form, main"); parent = parent.parentElement) {
       const others = Array.from(parent.querySelectorAll(`${COMBO}, input:not([type="hidden"]), textarea`)).filter((node) => node !== element && !element.contains(node) && !node.contains(element));
@@ -413,6 +621,7 @@
     return { container, input, controlBox, toggleBtn };
   }
   function getComboboxMenus(element) {
+    if (isLeverLocation(element)) return Array.from(element.parentElement.querySelectorAll(".dropdown-container"));
     const { container, input } = resolveComboboxParts(element);
     const ids = new Set([element, input].filter(Boolean).flatMap((node) => `${node.getAttribute("aria-controls") || ""} ${node.getAttribute("aria-owns") || ""}`.trim().split(/\s+/).filter(Boolean)));
     const root = element.getRootNode();
@@ -422,13 +631,13 @@
   function discoverComboboxOptions(element) {
     const options = [...new Set(getComboboxMenus(element).flatMap((menu) => {
       if (menu.hidden || menu.getAttribute("aria-hidden") === "true" || menu.style.display === "none") return [];
-      return Array.from(menu.querySelectorAll(OPTION)).filter((option) => option.textContent?.trim() && !option.hidden && option.style.display !== "none" && option.ownerDocument.defaultView.getComputedStyle(option).visibility !== "hidden" && !option.hasAttribute("disabled") && option.getAttribute("aria-disabled") !== "true");
+      return Array.from(menu.querySelectorAll(isLeverLocation(element) ? ".dropdown-results > .dropdown-location" : OPTION)).filter((option) => option.textContent?.trim() && !option.hidden && option.style.display !== "none" && option.ownerDocument.defaultView.getComputedStyle(option).visibility !== "hidden" && !option.hasAttribute("disabled") && option.getAttribute("aria-disabled") !== "true");
     }))];
     const input = resolveComboboxParts(element).input || element;
     const labels = countryLabelsByInput.get(input) || /* @__PURE__ */ new Map();
     for (const option of options) {
-      const key2 = countryDisplayKey(option);
-      if (key2) labels.set(key2, option.textContent.trim());
+      const key3 = countryDisplayKey(option);
+      if (key3) labels.set(key3, option.textContent.trim());
     }
     countryLabelsByInput.set(input, labels);
     return options;
@@ -438,13 +647,17 @@
     return { value: option.getAttribute("data-value") || option.getAttribute("value") || label, label };
   }
   function findExactOption(options, target) {
-    const key2 = optionKey(target);
-    if (!key2) return null;
-    const matches = options.filter((option) => optionKey(option.label) === key2 || optionKey(option.value) === key2);
+    const key3 = optionKey(target);
+    if (!key3) return null;
+    const matches = options.filter((option) => optionKey(option.label) === key3 || optionKey(option.value) === key3);
     return matches.length === 1 ? matches[0] : null;
   }
   function readComboboxSelection(element) {
     if (!element?.isConnected) return [];
+    if (isLeverLocation(element)) {
+      const activated = activatedLocations.get(element);
+      return activated && element.value === activated && getComboboxMenus(element).every((menu) => menu.hidden || menu.style.display === "none" || element.ownerDocument.defaultView.getComputedStyle(menu).display === "none") ? [activated] : [];
+    }
     const { container, input } = resolveComboboxParts(element);
     const labels = countryLabelsByInput.get(input || element);
     const values = Array.from(container.querySelectorAll(VALUE)).map((node) => labels?.get(countryDisplayKey(node)) || node.textContent.trim()).filter(Boolean);
@@ -465,6 +678,7 @@
     searchesByInput.set(input, search);
     const ownsSearch = () => input.isConnected && searchesByInput.get(input) === search && input.value === value;
     if (input.value === value) return ownsSearch;
+    activatedLocations.delete(input);
     const setter = Object.getOwnPropertyDescriptor(input.ownerDocument.defaultView.HTMLInputElement.prototype, "value")?.set;
     if (setter) setter.call(input, value);
     else input.value = value;
@@ -497,7 +711,7 @@
     await delay(80);
     if (!getComboboxMenus(element).length && toggleBtn) clickFieldControl(toggleBtn);
   }
-  async function waitForComboboxOptions(element, timeoutMs) {
+  async function waitForComboboxOptions(element, timeoutMs, locationQuery) {
     const { input } = resolveComboboxParts(element);
     const search = input && searchesByInput.get(input);
     const query = input?.value || "";
@@ -507,10 +721,18 @@
     do {
       if (!element.isConnected || input && (!input.isConnected || input.value !== query || searchesByInput.get(input) !== search)) return [];
       const menus = getComboboxMenus(element);
-      const loading = element.getAttribute("aria-busy") === "true" || menus.some((menu) => menu.getAttribute("aria-busy") === "true" || /\bloading\b/i.test(menu.textContent));
+      const loading = element.getAttribute("aria-busy") === "true" || menus.some((menu) => {
+        if (menu.getAttribute("aria-busy") === "true") return true;
+        if (isLeverLocation(element)) {
+          const indicator = menu.querySelector(".dropdown-loading-results");
+          return indicator && !indicator.hidden && indicator.ownerDocument.defaultView.getComputedStyle(indicator).display !== "none";
+        }
+        return /\bloading\b/i.test(menu.textContent);
+      });
+      const location = isLeverLocation(element) || isResidenceLabel(extractLabel(element));
       const options = discoverComboboxOptions(element).filter((option) => {
         const text = optionKey(option.textContent);
-        return words.every((word) => text.includes(word));
+        return location && query ? locationMatches(text, locationQuery || query) : words.every((word) => text.includes(word));
       });
       const signature = JSON.stringify(options.map(optionData));
       if (loading || signature !== previous) {
@@ -896,172 +1118,6 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
     return stripModelDashes(rewrittenText);
   }
 
-  // src/fields/labels.js
-  function cleanText(text) {
-    if (!text) return "";
-    return text.replace(/[\n\r\t]+/g, " ").replace(/\s{2,}/g, " ").replace(/[*:]+$/, "").trim();
-  }
-  function nameToLabel(name) {
-    if (!name) return "";
-    return name.replace(/[-_]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/\b\w/g, (c) => c.toUpperCase()).trim();
-  }
-  function extractLabel(element) {
-    if (!element || !(element instanceof Element)) return "";
-    const ariaLabel = element.getAttribute("aria-label");
-    if (ariaLabel && ariaLabel.trim()) {
-      return cleanText(ariaLabel);
-    }
-    const ariaLabelledBy = element.getAttribute("aria-labelledby");
-    if (ariaLabelledBy) {
-      const ids = ariaLabelledBy.split(/\s+/);
-      const textParts = ids.map((id) => document.getElementById(id)).filter((el) => el && el !== element && !element.contains(el)).map((el) => {
-        const clone = el.cloneNode(true);
-        clone.querySelectorAll('input,textarea,select,button,[role="combobox"],[role="listbox"]').forEach((control) => control.remove());
-        return clone.textContent || "";
-      }).join(" ");
-      if (textParts.trim()) {
-        return cleanText(textParts);
-      }
-    }
-    if (element.id) {
-      try {
-        const labelEl = document.querySelector(`label[for="${CSS.escape(element.id)}"]`);
-        if (labelEl && labelEl.textContent) {
-          return cleanText(labelEl.textContent);
-        }
-      } catch {
-      }
-    }
-    const parentLabel = element.closest("label");
-    if (parentLabel && parentLabel.textContent) {
-      const clone = parentLabel.cloneNode(true);
-      const inputs = clone.querySelectorAll("input, select, textarea");
-      inputs.forEach((input) => input.remove());
-      const text = cleanText(clone.textContent);
-      if (text) return text;
-    }
-    const fieldset = element.closest("fieldset");
-    if (fieldset) {
-      const legend = fieldset.querySelector("legend");
-      if (legend && legend.textContent) {
-        return cleanText(legend.textContent);
-      }
-    }
-    const parent = element.parentElement;
-    if (parent) {
-      const siblings = Array.from(parent.children);
-      const index = siblings.indexOf(element);
-      if (index > 0) {
-        for (let i = index - 1; i >= 0; i--) {
-          const sib = siblings[i];
-          if (sib.matches("label, .label, .form-label, .field-label, h3, h4, h5, p, span, strong")) {
-            const text = cleanText(sib.textContent);
-            if (text && text.length < 150) return text;
-          }
-        }
-      }
-      const grandParent = parent.parentElement;
-      if (grandParent) {
-        const heading = grandParent.querySelector(".label, .form-label, .field-label, label, legend");
-        if (heading && heading.textContent) {
-          const text = cleanText(heading.textContent);
-          if (text && text.length < 150) return text;
-        }
-      }
-    }
-    const placeholder = element.getAttribute("placeholder");
-    if (placeholder && placeholder.trim()) {
-      return cleanText(placeholder);
-    }
-    const name = element.getAttribute("name");
-    if (name) return nameToLabel(name);
-    if (element.id) return nameToLabel(element.id);
-    return "Unknown Field";
-  }
-  function extractGroupLabel(elements = [], groupName = "") {
-    if (!elements || elements.length === 0) return nameToLabel(groupName);
-    const firstEl = elements[0];
-    const fieldset = firstEl.closest("fieldset");
-    if (fieldset) {
-      const legend = fieldset.querySelector("legend");
-      if (legend && legend.textContent.trim()) {
-        return cleanText(legend.textContent);
-      }
-    }
-    const container = firstEl.closest('.form-group, .field, [role="radiogroup"], [role="group"], .question, div');
-    if (container) {
-      const ariaLabel = container.getAttribute("aria-label");
-      if (ariaLabel && ariaLabel.trim()) return cleanText(ariaLabel);
-      const headings = Array.from(container.querySelectorAll("label, legend, .label, .form-label, .field-label, h3, h4, h5, p, strong, span"));
-      for (const h of headings) {
-        const containsRadio = elements.some((el) => h.contains(el));
-        if (!containsRadio) {
-          const text = cleanText(h.textContent);
-          if (text && text.length > 2 && text.length < 250) {
-            return text;
-          }
-        }
-      }
-      try {
-        const clone = container.cloneNode(true);
-        clone.querySelectorAll("input, .radio-group, .checkbox-group, .radio-item, .checkbox-item, ul, li").forEach((el) => el.remove());
-        const remainingText = cleanText(clone.textContent);
-        if (remainingText && remainingText.length > 3 && remainingText.length < 250) {
-          return remainingText;
-        }
-      } catch {
-      }
-    }
-    if (groupName) return nameToLabel(groupName);
-    return extractLabel(firstEl);
-  }
-  function extractOptionLabel(element) {
-    if (!element) return "";
-    const parentLabel = element.closest("label");
-    if (parentLabel) {
-      const clone = parentLabel.cloneNode(true);
-      clone.querySelectorAll("input").forEach((input) => input.remove());
-      const text = cleanText(clone.textContent);
-      if (text) return text;
-    }
-    if (element.id) {
-      try {
-        const labelEl = document.querySelector(`label[for="${CSS.escape(element.id)}"]`);
-        if (labelEl && labelEl.textContent) {
-          return cleanText(labelEl.textContent);
-        }
-      } catch {
-      }
-    }
-    if (element.nextSibling && element.nextSibling.textContent) {
-      const text = cleanText(element.nextSibling.textContent);
-      if (text) return text;
-    }
-    if (element.value && element.value !== "on") {
-      return cleanText(element.value);
-    }
-    return cleanText(element.id || "Option");
-  }
-  function extractDescription(element) {
-    if (!element || !(element instanceof Element)) return "";
-    const describedBy = element.getAttribute("aria-describedby");
-    if (describedBy) {
-      const ids = describedBy.split(/\s+/);
-      const textParts = ids.map((id) => document.getElementById(id)).filter(Boolean).map((el) => el.textContent || "").join(" ");
-      if (textParts.trim()) {
-        return cleanText(textParts);
-      }
-    }
-    const container = element.closest(".form-group, .field, .input-wrapper, fieldset, div");
-    if (container) {
-      const helpEl = container.querySelector(".help-text, .form-text, .description, .hint, small");
-      if (helpEl && helpEl !== element && !helpEl.contains(element)) {
-        return cleanText(helpEl.textContent);
-      }
-    }
-    return "";
-  }
-
   // src/fields/scanner.js
   var fieldCounter = 0;
   function isVisible(el) {
@@ -1127,7 +1183,7 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
       if (processedElements.has(el)) continue;
       const tagName = el.tagName.toLowerCase();
       const typeAttr = (el.getAttribute("type") || "").toLowerCase();
-      const isCombobox = el.matches(COMBO);
+      const isCombobox = el.matches(COMBO) || isLeverLocation(el);
       if (typeAttr === "hidden" || typeAttr === "submit" || typeAttr === "button" && !isCombobox || typeAttr === "reset" || typeAttr === "image" || typeAttr === "password" || typeAttr === "file") {
         continue;
       }
@@ -1311,6 +1367,7 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
     return detectedFields;
   }
   async function harvestComboboxOptions(fields, searchQueries = /* @__PURE__ */ new Map()) {
+    const profileLocation = getProfile().location?.trim();
     for (const field of fields.filter((field2) => field2.type === FIELD_TYPES2.COMBOBOX)) {
       const element = field.element;
       if (!element) continue;
@@ -1318,8 +1375,11 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
       let ownsSearch;
       try {
         await openCombobox(element);
-        ownsSearch = setComboboxSearch(input, searchQueries.get(field.id) || "");
-        field.options = (await waitForComboboxOptions(element)).map(optionData);
+        const query = searchQueries.get(field.id) || (isResidenceLabel(field.label) ? profileLocation : "") || "";
+        const search = isLeverLocation(element) || isResidenceLabel(field.label) ? query.split(",")[0].trim() : query;
+        ownsSearch = setComboboxSearch(input, search);
+        field.options = (await waitForComboboxOptions(element, void 0, isResidenceLabel(field.label) ? query : void 0)).map(optionData);
+        if (query && isResidenceLabel(field.label)) field.options = field.options.filter((option) => locationMatches(option.label, query));
         logger.info(`Harvest[${field.id}]: ${field.options.length} owned options`);
       } catch (err) {
         field.options = [];
@@ -1603,8 +1663,9 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
         return await waitForComboboxSelection(element, target);
       }
       await openCombobox(element);
-      ownsSearch = setComboboxSearch(input, "");
-      let options = await waitForComboboxOptions(element);
+      const location = isLeverLocation(element) || known && isResidenceLabel(extractLabel(element));
+      ownsSearch = setComboboxSearch(input, location ? target.split(",")[0].trim() : "");
+      let options = await waitForComboboxOptions(element, void 0, location ? target : void 0);
       if (!ownsSearch()) return false;
       let match = findExactOption(options.map((option) => ({ ...optionData(option), element: option })), target);
       if (!match && known && input) {
@@ -1623,6 +1684,7 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
       match.element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
       match.element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, button: 0 }));
       clickFieldControl(match.element);
+      recordLocationActivation(element, match.label);
       if (!await waitForComboboxSelection(element, target)) return false;
       closeCombobox(element);
       return await waitForComboboxSelection(element, target);
@@ -2045,11 +2107,11 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
   }
 
   // src/sessions.js
-  var key = (id) => `${STORAGE_KEYS.SESSIONS}:${id}`;
+  var key2 = (id) => `${STORAGE_KEYS.SESSIONS}:${id}`;
   var now = () => (/* @__PURE__ */ new Date()).toISOString();
   function saveSession(session) {
     session.updatedAt = now();
-    gmSet(key(session.id), session);
+    gmSet(key2(session.id), session);
     const ids = gmGet(STORAGE_KEYS.SESSIONS, []);
     gmSet(STORAGE_KEYS.SESSIONS, [session.id, ...ids.filter((id) => id !== session.id)].slice(0, 100));
     return session;
@@ -2113,10 +2175,10 @@ ${constraints?.maxLength ? `Maximum Length: ${constraints.maxLength} characters`
           resolve(value);
         });
       });
-      const session = tab?.jobCopilotSession ? gmGet(key(tab.jobCopilotSession)) : null;
+      const session = tab?.jobCopilotSession ? gmGet(key2(tab.jobCopilotSession)) : null;
       if (matchesSession(session, url) || pendingRedirectMatches(session, url)) return session;
     }
-    const candidates = gmGet(STORAGE_KEYS.SESSIONS, []).map((id) => gmGet(key(id))).filter((s) => matchesSession(s, url));
+    const candidates = gmGet(STORAGE_KEYS.SESSIONS, []).map((id) => gmGet(key2(id))).filter((s) => matchesSession(s, url));
     return candidates.length === 1 ? candidates[0] : null;
   }
 
